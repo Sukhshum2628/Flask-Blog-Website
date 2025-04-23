@@ -1,0 +1,4 @@
+Flask==2.3.2
+Flask-PyMongo==2.3.0
+Werkzeug==2.3.4
+dnspython==2.4.2

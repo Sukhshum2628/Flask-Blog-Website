@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+    <h2>My Dashboard</h2>
+    {% for post in posts %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <h4 class="card-title">{{ post.title }}</h4>
+                <p class="card-text">{{ post.content }}</p>
+                <a href="{{ url_for('delete_post', post_id=post._id) }}" class="btn btn-danger btn-sm">Delete</a>
+            </div>
+        </div>
+    {% else %}
+        <p>You have no posts yet.</p>
+    {% endfor %}
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="fw-bold">Dashboard</h1>
+            <a href="{{ url_for('new_post') }}" class="btn btn-success rounded-pill px-4">Write a story</a>
+        </div>
+
+        {% if draft_count > 0 and section != 'drafts' %}
+            <div class="alert alert-light border shadow-sm d-flex align-items-center mb-4" role="alert">
+                <i class="bi bi-pencil-square fs-4 me-3 text-secondary"></i>
+                <div>
+                    <strong>Pick up where you left off!</strong>
+                    <div class="small text-muted">You have {{ draft_count }} unpublished draft{{ 's' if draft_count != 1 else '' }}. <a href="{{ url_for('dashboard', section='drafts') }}" class="alert-link">Finish them now</a>.</div>
+                </div>
+            </div>
+        {% endif %}
+
+        <ul class="nav nav-tabs mb-4 border-bottom-0">
+            <li class="nav-item">
+                <a class="nav-link {{ 'active fw-bold border-bottom border-dark text-dark' if section == 'stories' else 'text-muted' }}" 
+                   href="{{ url_for('dashboard', section='stories') }}" style="border-width: 2px !important;">Your Stories</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active fw-bold border-bottom border-dark text-dark' if section == 'drafts' else 'text-muted' }}" 
+                   href="{{ url_for('dashboard', section='drafts') }}" style="border-width: 2px !important;">Drafts <span class="badge bg-secondary rounded-pill ms-1">{{ draft_count }}</span></a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active fw-bold border-bottom border-dark text-dark' if section == 'saved' else 'text-muted' }}" 
+                   href="{{ url_for('dashboard', section='saved') }}" style="border-width: 2px !important;">Reading List</a>
+            </li>
+        </ul>
+
+        {% if posts %}
+            <div class="list-group list-group-flush">
+                {% for post in posts %}
+                    <div class="list-group-item py-4 border-bottom">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h4 class="fw-bold mb-1">
+                                    <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-dark text-decoration-none">{{ post.title }}</a>
+                                </h4>
+                                <small class="text-muted">
+                                    {% if section == 'saved' %}
+                                        By {{ post.author }} · 
+                                    {% endif %}
+                                    
+                                    {% if post.is_draft %}
+                                        Last edited {{ post.updated_at|time_ago }}
+                                    {% else %}
+                                        Published on {{ post.created_at.strftime('%b %d, %Y') if post.created_at else 'Unknown date' }}
+                                        · {{ post.likes|default([])|length }} claps
+                                        · {{ post.views|default(0) }} views
+                                    {% endif %}
+                                </small>
+                            </div>
+                            
+                            {% if section == 'stories' or section == 'drafts' %}
+                                <div class="btn-group">
+                                    <a href="{{ url_for('edit_post', post_id=post._id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal{{ post._id }}">
+                                        Delete
+                                    </button>
+                                </div>
+                            {% else %}
+                                <div>
+                                     <a href="{{ url_for('bookmark_post', post_id=post._id) }}" class="btn btn-sm btn-outline-secondary" title="Remove">
+                                        <i class="bi bi-bookmark-x"></i>
+                                     </a>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if section == 'stories' or section == 'drafts' %}
+                        <!-- Delete Modal -->
+                        <div class="modal fade" id="deleteModal{{ post._id }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Delete Story?</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        Are you sure you want to delete "{{ post.title }}"? This action cannot be undone.
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                        <form action="{{ url_for('delete_post', post_id=post._id) }}" method="POST" class="d-inline">
+                                            <button type="submit" class="btn btn-danger">Delete</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <p class="text-muted fs-5">
+                    {% if section == 'stories' %}
+                        You haven't published any stories yet.
+                    {% else %}
+                        Your reading list is empty.
+                    {% endif %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

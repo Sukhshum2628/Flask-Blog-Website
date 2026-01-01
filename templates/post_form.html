@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<!-- Trumbowyg CSS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/trumbowyg.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <h2 class="mb-4">{{ legend|default("New Story") }}</h2>
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            
+            <div class="mb-3">
+                {{ form.title(class="form-control form-control-lg border-0 fw-bold fs-2", placeholder="Title") }}
+                {% if form.title.errors %}
+                    <div class="text-danger small">{{ form.title.errors[0] }}</div>
+                {% endif %}
+            </div>
+
+            <div class="mb-3">
+                {{ form.subtitle.label(class="form-label") }}
+                {{ form.subtitle(class="form-control") }}
+            </div>
+            
+            <div class="mb-3">
+                {{ form.series_name.label(class="form-label") }}
+                {{ form.series_name(class="form-control", placeholder="e.g. The Ultimate Guide to Flask") }}
+                <div class="form-text">If this is part of a series, enter the series name here.</div>
+            </div>
+
+            <div class="mb-3">
+                {{ form.cover_url(class="form-control border-0 text-muted", placeholder="Cover Image URL (e.g. Unsplash link)") }}
+            </div>
+
+            <div class="mb-3">
+                {{ form.tags(class="form-control border-0 text-muted", placeholder="Tags (e.g. Technology, Python)") }}
+            </div>
+
+            <div class="mb-4">
+                {{ form.content(id="editor", class="form-control", placeholder="Tell your story...") }}
+                {% if form.content.errors %}
+                    <div class="text-danger small">{{ form.content.errors[0] }}</div>
+                {% endif %}
+            </div>
+
+            <div class="d-flex justify-content-end">
+                {{ form.save_draft(class="btn btn-outline-secondary me-2 rounded-pill px-4") }}
+                {{ form.submit(class="btn btn-success rounded-pill px-4") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- jQuery & Trumbowyg -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/trumbowyg.min.js"></script>
+<script>
+    $('#editor').trumbowyg({
+        btns: [
+            ['viewHTML'],
+            ['undo', 'redo'], 
+            ['formatting'],
+            ['strong', 'em', 'del'],
+            ['link'],
+            ['insertImage'],
+            ['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
+            ['unorderedList', 'orderedList'],
+            ['horizontalRule'],
+            ['fullscreen']
+        ],
+        autogrow: true,
+        removeformatPasted: true
+    });
+</script>
+{% endblock %}

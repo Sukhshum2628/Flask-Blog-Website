@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="d-flex align-items-start mb-5 pb-4 border-bottom">
+            <div class="flex-grow-1">
+                <h1 class="fw-bold mb-3">{{ user.username }}</h1>
+                <p class="text-muted fs-5">{{ user.bio }}</p>
+                {% if session.user == user.username %}
+                    <a href="{{ url_for('settings') }}" class="text-success small text-decoration-none">Edit profile</a>
+                {% endif %}
+            </div>
+            <img src="{{ user.avatar_url or 'https://ui-avatars.com/api/?name=' + user.username }}" 
+                 class="rounded-circle ms-4" width="80" height="80" alt="Avatar">
+        </div>
+
+        <h4 class="fw-bold mb-4">Latest</h4>
+        
+        {% for post in posts %}
+            <div class="card border-0 mb-4">
+                <div class="card-body p-0">
+                    <small class="text-muted text-uppercase">{{ post.created_at.strftime('%b %d, %Y') if post.created_at else '' }}</small>
+                    <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
+                        <h3 class="fw-bold mt-1 mb-2">{{ post.title }}</h3>
+                        <p class="text-muted mb-2">{{ post.subtitle or post.content|striptags|truncate(80) }}</p>
+                    </a>
+                </div>
+            </div>
+        {% else %}
+            <p class="text-muted">Hasn't published any stories yet.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

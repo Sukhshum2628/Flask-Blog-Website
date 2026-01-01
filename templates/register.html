@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5 col-lg-4 text-center">
+        <h2 class="fw-bold mb-4">Join FlaskBlog.</h2>
+        
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            
+            <div class="form-floating mb-3">
+                {{ form.username(class="form-control", placeholder="Username") }}
+                {{ form.username.label }}
+                {% if form.username.errors %}
+                    <div class="text-danger small text-start mt-1">{{ form.username.errors[0] }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-floating mb-3">
+                {{ form.email(class="form-control", placeholder="Email") }}
+                {{ form.email.label }}
+                {% if form.email.errors %}
+                    <div class="text-danger small text-start mt-1">{{ form.email.errors[0] }}</div>
+                {% endif %}
+            </div>
+            
+            <div class="form-floating mb-4">
+                {{ form.password(class="form-control", placeholder="Password") }}
+                {{ form.password.label }}
+                {% if form.password.errors %}
+                    <div class="text-danger small text-start mt-1">{{ form.password.errors[0] }}</div>
+                {% endif %}
+            </div>
+
+            <div class="d-grid gap-2 mb-3">
+                {{ form.submit(class="btn btn-black btn-lg rounded-pill") }}
+            </div>
+            
+            <p class="small text-muted">
+                Already have an account? <a href="{{ url_for('login') }}" class="text-success text-decoration-none">Sign in</a>
+            </p>
+        </form>
+    </div>
+</div>
+{% endblock %}

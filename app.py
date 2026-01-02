@@ -196,14 +196,18 @@ def verify_reset_token(token, expires_sec=1800):
 def send_reset_email(user):
     token = get_reset_token(user['_id'])
     msg = Message('Password Reset Request',
-                  sender='noreply@demo.com',
+                  sender=os.environ.get('MAIL_USER'), # Better to use the actual sender
                   recipients=[user['email']])
     msg.body = f'''To reset your password, visit the following link:
 {url_for('reset_token', token=token, _external=True)}
 
 If you did not make this request then simply ignore this email and no changes will be made.
 '''
-    mail.send(msg)
+    try:
+        mail.send(msg)
+        print(f"Email sent to {user['email']}")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
 
 # Context Processor for User Info in Navbar
 @app.context_processor

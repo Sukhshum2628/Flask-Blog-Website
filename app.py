@@ -64,42 +64,47 @@ import requests
 # Mail Configuration (Removed SMTP, using Resend API)
 # We don't need app.config['MAIL_SERVER'] etc anymore.
 
-# Helper for Resend API
-def send_email_resend(to_email, subject, body):
-    api_key = os.environ.get("RESEND_API_KEY")
+# Helper for Brevo API (formerly Sendinblue)
+def send_email_brevo(to_email, subject, body):
+    api_key = os.environ.get("BREVO_API_KEY")
+    sender_email = os.environ.get("MAIL_USER") # Must be the email you verified in Brevo
+    
     if not api_key:
-        print("ERROR: RESEND_API_KEY not found in environment variables.", flush=True)
+        print("ERROR: BREVO_API_KEY not found.", flush=True)
+        return False
+    if not sender_email:
+        print("ERROR: MAIL_USER not found (needed for Sender).", flush=True)
         return False
 
+    url = "https://api.brevo.com/v3/smtp/email"
     headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
     }
     
-    # If you haven't verified a domain, Resend usually requires sending FROM 'onboarding@resend.dev'
-    # and TO the email you signed up with.
     payload = {
-        "from": "Flask Blog <onboarding@resend.dev>",
-        "to": [to_email],
+        "sender": {"name": "Flask Blog", "email": sender_email},
+        "to": [{"email": to_email}],
         "subject": subject,
-        "text": body
+        "htmlContent": f"<p>{body.replace(chr(10), '<br>')}</p>" # Convert newlines to HTML breaks
     }
 
     try:
-        response = requests.post("https://api.resend.com/emails", json=payload, headers=headers)
+        response = requests.post(url, json=payload, headers=headers)
         if response.status_code in [200, 201, 202]:
-            print(f"SUCCESS: Email sent to {to_email} via Resend.", flush=True)
+            print(f"SUCCESS: Email sent to {to_email} via Brevo.", flush=True)
             return True
         else:
-            print(f"ERROR: Resend API failed. Status: {response.status_code}, Body: {response.text}", flush=True)
+            print(f"ERROR: Brevo API failed. Status: {response.status_code}, Body: {response.text}", flush=True)
             return False
     except Exception as e:
-        print(f"ERROR: Exception while sending email via Resend: {e}", flush=True)
+        print(f"ERROR: Exception while sending email via Brevo: {e}", flush=True)
         return False
 
 def send_async_email(app, to_email, subject, body):
     with app.app_context():
-        send_email_resend(to_email, subject, body)
+        send_email_brevo(to_email, subject, body)
 
 def send_reset_email(user):
     print(f"Attempting to send reset email to: {user['email']}", flush=True)
@@ -118,21 +123,19 @@ If you did not make this request then simply ignore this email and no changes wi
 
 @app.route('/test_email')
 def test_email():
-    resend_key = os.environ.get('RESEND_API_KEY')
-    if not resend_key:
-        return "Error: RESEND_API_KEY not set."
+    key = os.environ.get('BREVO_API_KEY')
+    if not key:
+        return "Error: BREVO_API_KEY not set."
         
-    # We must send TO the signed-up user during testing
-    # Assuming MAIL_USER env var holds your email address for convenience, or hardcode it
     target_email = os.environ.get('MAIL_USER') 
     
     if not target_email:
-        return "Error: MAIL_USER env var not set (needed to know where to send test email)."
+        return "Error: MAIL_USER env var not set."
 
-    if send_email_resend(target_email, "Resend API Test", "If you read this, the API integration is working!"):
-        return f"Email sent via Resend to {target_email}! Check logs for details."
+    if send_email_brevo(target_email, "Brevo API Test", "If you read this, the Brevo integration is working!"):
+        return f"Email sent via Brevo to {target_email}! Check logs for details."
     else:
-        return "Failed to send email. Check Render logs."
+        return "Failed to send email. Check Render logs for Brevo error response."
 
 mongo = PyMongo(app)
 users = mongo.db.users

@@ -544,13 +544,18 @@ def view_post(post_id):
     server_progress = 0
     if 'user' in session:
         user = users.find_one({'username': session['user']})
-        saved = user.get('saved_posts', [])
-        is_bookmarked = ObjectId(post_id) in saved
+        if user:
+            saved = user.get('saved_posts', [])
+            is_bookmarked = ObjectId(post_id) in saved
 
-        # Get reading progress
-        hist = reading_history.find_one({'user': session['user'], 'post_id': ObjectId(post_id)})
-        if hist:
-            server_progress = hist.get('progress', 0)
+            # Get reading progress
+            hist = reading_history.find_one({'user': session['user'], 'post_id': ObjectId(post_id)})
+            if hist:
+                server_progress = hist.get('progress', 0)
+        else:
+            # Session exists but user not found in DB (e.g. after DB reset)
+            # Effectively treat as logged out for this request, or could clear session.
+            pass
     
     # Track Reading Session
     # Use session ID or username to avoid counting same user twice

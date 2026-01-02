@@ -57,40 +57,82 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
 app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
 
-# Mail Configuration
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USER')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASS')
-mail = Mail(app)
+import requests
 
-# ... (existing code)
+# ... (imports)
+
+# Mail Configuration (Removed SMTP, using Resend API)
+# We don't need app.config['MAIL_SERVER'] etc anymore.
+
+# Helper for Resend API
+def send_email_resend(to_email, subject, body):
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        print("ERROR: RESEND_API_KEY not found in environment variables.", flush=True)
+        return False
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # If you haven't verified a domain, Resend usually requires sending FROM 'onboarding@resend.dev'
+    # and TO the email you signed up with.
+    payload = {
+        "from": "Flask Blog <onboarding@resend.dev>",
+        "to": [to_email],
+        "subject": subject,
+        "text": body
+    }
+
+    try:
+        response = requests.post("https://api.resend.com/emails", json=payload, headers=headers)
+        if response.status_code in [200, 201, 202]:
+            print(f"SUCCESS: Email sent to {to_email} via Resend.", flush=True)
+            return True
+        else:
+            print(f"ERROR: Resend API failed. Status: {response.status_code}, Body: {response.text}", flush=True)
+            return False
+    except Exception as e:
+        print(f"ERROR: Exception while sending email via Resend: {e}", flush=True)
+        return False
+
+def send_async_email(app, to_email, subject, body):
+    with app.app_context():
+        send_email_resend(to_email, subject, body)
+
+def send_reset_email(user):
+    print(f"Attempting to send reset email to: {user['email']}", flush=True)
+    token = get_reset_token(user['_id'])
+    
+    subject = 'Password Reset Request'
+    body = f'''To reset your password, visit the following link:
+{url_for('reset_token', token=token, _external=True)}
+
+If you did not make this request then simply ignore this email and no changes will be made.
+'''
+    # Send in background thread
+    threading.Thread(target=send_async_email, args=(app, user['email'], subject, body)).start()
+
+# ... (routes)
 
 @app.route('/test_email')
 def test_email():
-    results = []
-    results.append(f"Testing Email Configuration...")
-    results.append(f"MAIL_SERVER: {app.config['MAIL_SERVER']}")
-    results.append(f"MAIL_PORT: {app.config['MAIL_PORT']}")
-    results.append(f"MAIL_USERNAME: {app.config['MAIL_USERNAME']}")
-    
-    try:
-        sender = app.config['MAIL_USERNAME']
-        if not sender:
-            return "ERROR: MAIL_USER environment variable is NOT SET in Render."
-            
-        msg = Message('Diagnostic Test Email',
-                    sender=sender,
-                    recipients=[sender]) 
-        msg.body = 'This is a diagnostic test to verify SMTP settings on Render.'
+    resend_key = os.environ.get('RESEND_API_KEY')
+    if not resend_key:
+        return "Error: RESEND_API_KEY not set."
         
-        # SENDING SYNCHRONOUSLY for diagnostics
-        mail.send(msg)
-        return f"SUCCESS! Email sent to {sender}. Check your inbox.<br><br>Details:<br>" + "<br>".join(results)
-    except Exception as e:
-        return f"FAILED to send email.<br>Error: {str(e)}<br><br>Check if your MAIL_PASS is a 16-character Google App Password (not your regular password).<br><br>Details:<br>" + "<br>".join(results)
+    # We must send TO the signed-up user during testing
+    # Assuming MAIL_USER env var holds your email address for convenience, or hardcode it
+    target_email = os.environ.get('MAIL_USER') 
+    
+    if not target_email:
+        return "Error: MAIL_USER env var not set (needed to know where to send test email)."
+
+    if send_email_resend(target_email, "Resend API Test", "If you read this, the API integration is working!"):
+        return f"Email sent via Resend to {target_email}! Check logs for details."
+    else:
+        return "Failed to send email. Check Render logs."
 
 mongo = PyMongo(app)
 users = mongo.db.users

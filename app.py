@@ -193,21 +193,27 @@ def verify_reset_token(token, expires_sec=1800):
         return None
     return users.find_one({'_id': ObjectId(user_id)})
 
+def send_async_email(app, msg):
+    with app.app_context():
+        try:
+            mail.send(msg)
+            print(f"SUCCESS: Email sent to {msg.recipients}", flush=True)
+        except Exception as e:
+            print(f"ERROR: Failed to send email: {e}", flush=True)
+
 def send_reset_email(user):
+    print(f"Attempting to send reset email to: {user['email']}", flush=True)
     token = get_reset_token(user['_id'])
     msg = Message('Password Reset Request',
-                  sender=os.environ.get('MAIL_USER'), # Better to use the actual sender
+                  sender=os.environ.get('MAIL_USER'),
                   recipients=[user['email']])
     msg.body = f'''To reset your password, visit the following link:
 {url_for('reset_token', token=token, _external=True)}
 
 If you did not make this request then simply ignore this email and no changes will be made.
 '''
-    try:
-        mail.send(msg)
-        print(f"Email sent to {user['email']}")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
+    # Send in background thread to avoid timeout
+    threading.Thread(target=send_async_email, args=(app, msg)).start()
 
 # Context Processor for User Info in Navbar
 @app.context_processor

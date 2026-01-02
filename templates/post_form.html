@@ -24,10 +24,34 @@
                 {{ form.subtitle(class="form-control") }}
             </div>
             
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    {{ form.intent.label(class="form-label fw-bold") }}
+                    {{ form.intent(class="form-select") }}
+                    <div class="form-text">What is the primary goal of this piece?</div>
+                </div>
+                <div class="col-md-6">
+                    {{ form.freshness.label(class="form-label fw-bold") }}
+                    {{ form.freshness(class="form-select") }}
+                    <div class="form-text">Is this content time-sensitive?</div>
+                </div>
+            </div>
+
             <div class="mb-3">
                 {{ form.series_name.label(class="form-label") }}
                 {{ form.series_name(class="form-control", placeholder="e.g. The Ultimate Guide to Flask") }}
                 <div class="form-text">If this is part of a series, enter the series name here.</div>
+            </div>
+            
+            <div class="mb-3">
+                {{ form.summary.label(class="form-label fw-bold text-muted small text-uppercase") }}
+                {{ form.summary(class="form-control", rows=2, placeholder="A brief, author-curated summary for your readers.") }}
+            </div>
+            
+            <div class="mb-4">
+                {{ form.why_wrote.label(class="form-label fw-bold text-muted small text-uppercase") }}
+                {{ form.why_wrote(class="form-control", rows=2, placeholder="Why does this story exist? What motivated you?") }}
+                <div class="form-text">This will appear at the end of your story as a personal note.</div>
             </div>
 
             <div class="mb-3">

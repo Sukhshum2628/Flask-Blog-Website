@@ -27,7 +27,16 @@
     <div class="col-lg-8">
         <!-- Post Header -->
         <article>
-            <h1 class="fw-bold mb-3 mt-4">
+            <div class="mb-2">
+                {% if post.intent %}
+                    <span class="badge bg-secondary text-uppercase" style="letter-spacing: 1px; font-size: 0.7rem;">{{ post.intent }}</span>
+                {% endif %}
+                {% if post.freshness == 'aging' %}
+                    <span class="badge bg-warning text-dark ms-1" title="This content might be outdated"><i class="bi bi-clock-history"></i> Aging</span>
+                {% endif %}
+            </div>
+            
+            <h1 class="fw-bold mb-3 mt-2">
                 {% if post.is_draft %}
                     <span class="badge bg-secondary fs-6 align-middle me-2">DRAFT</span>
                 {% endif %}
@@ -35,6 +44,12 @@
             </h1>
             {% if post.subtitle %}
                 <h4 class="text-muted mb-4">{{ post.subtitle }}</h4>
+            {% endif %}
+            
+            {% if post.summary %}
+                <div class="p-3 bg-light border-start border-4 border-dark mb-4 fst-italic text-muted">
+                    <strong>TL;DR:</strong> {{ post.summary }}
+                </div>
             {% endif %}
 
             <div class="d-flex align-items-center mb-4">
@@ -74,6 +89,14 @@
                     <a href="{{ url_for('search', q=tag) }}" class="badge bg-light text-dark text-decoration-none border fw-normal p-2 me-1">{{ tag }}</a>
                 {% endfor %}
             </div>
+            
+            {% if post.why_wrote %}
+                <div class="mt-5 p-4 bg-light rounded-3 position-relative">
+                    <span class="position-absolute top-0 start-50 translate-middle badge rounded-pill bg-dark text-uppercase px-3 py-2">Author's Note</span>
+                    <h6 class="fw-bold text-center mb-2 mt-2">Why I Wrote This</h6>
+                    <p class="text-muted text-center mb-0 fst-italic">"{{ post.why_wrote }}"</p>
+                </div>
+            {% endif %}
         </article>
         
         <hr class="my-5">

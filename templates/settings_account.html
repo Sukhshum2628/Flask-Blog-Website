@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('settings') }}" class="text-decoration-none text-dark">Settings</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Account Security</li>
+            </ol>
+        </nav>
+        
+        <h3 class="fw-bold mb-4">Account Security</h3>
+        
+        <div class="card border-0 shadow-sm p-4">
+            <form method="POST">
+                {{ form.hidden_tag() }}
+
+                <div class="mb-4">
+                    {{ form.email.label(class="form-label fw-bold") }}
+                    {{ form.email(class="form-control") }}
+                    <div class="form-text">Your email address for notifications and recovery.</div>
+                </div>
+                
+                <div class="alert alert-light border rounded mb-4">
+                    <i class="bi bi-info-circle me-2"></i> Password change is currently handled via reset email.
+                    <a href="{{ url_for('reset_request') }}" class="alert-link">Reset Password</a>
+                </div>
+
+                <div class="d-flex justify-content-end">
+                    <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary me-2">Cancel</a>
+                    {{ form.submit(class="btn btn-dark rounded-pill px-4") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

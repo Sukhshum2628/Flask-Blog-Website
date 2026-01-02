@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('settings') }}" class="text-decoration-none text-dark">Settings</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Public Profile</li>
+            </ol>
+        </nav>
+
+        <h3 class="fw-bold mb-4">Public Profile</h3>
+
+        <div class="row">
+            <!-- Edit Form -->
+            <div class="col-md-7 mb-5 mb-md-0">
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-4">
+                        {{ form.bio.label(class="form-label fw-bold") }}
+                        {{ form.bio(class="form-control", rows=4, id="bioInput") }}
+                        <div class="form-text">Brief description for your profile.</div>
+                    </div>
+
+                    <div class="mb-4">
+                        {{ form.avatar_url.label(class="form-label fw-bold") }}
+                        {{ form.avatar_url(class="form-control", id="avatarInput") }}
+                        <div class="form-text">Paste a URL for your profile picture.</div>
+                    </div>
+
+                    <div class="d-flex justify-content-end">
+                        <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary me-2">Cancel</a>
+                        {{ form.submit(class="btn btn-success rounded-pill px-4") }}
+                    </div>
+                </form>
+            </div>
+
+            <!-- Live Preview -->
+            <div class="col-md-5 ps-md-5">
+                <h6 class="text-uppercase text-muted small fw-bold mb-3">Preview</h6>
+                <div class="card border-0 shadow-sm text-center p-4">
+                    <div class="mb-3">
+                        <img src="{{ user.avatar_url or 'https://ui-avatars.com/api/?name=' + user.username }}" 
+                             id="avatarPreview"
+                             class="rounded-circle shadow-sm" width="100" height="100" 
+                             style="object-fit: cover;"
+                             alt="Avatar Preview">
+                    </div>
+                    <h4 class="fw-bold mb-1">{{ user.username }}</h4>
+                    <p class="text-muted small mb-0" id="bioPreview">{{ user.bio or 'Your bio will appear here.' }}</p>
+                </div>
+                <div class="text-center mt-3">
+                    <small class="text-muted">This is how others will see you.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Simple Live Preview Script
+    const bioInput = document.getElementById('bioInput');
+    const bioPreview = document.getElementById('bioPreview');
+    const avatarInput = document.getElementById('avatarInput');
+    const avatarPreview = document.getElementById('avatarPreview');
+
+    bioInput.addEventListener('input', function() {
+        bioPreview.textContent = this.value || 'Your bio will appear here.';
+    });
+
+    avatarInput.addEventListener('input', function() {
+        if(this.value) {
+            avatarPreview.src = this.value;
+        } else {
+            avatarPreview.src = "https://ui-avatars.com/api/?name={{ user.username }}";
+        }
+    });
+</script>
+{% endblock %}

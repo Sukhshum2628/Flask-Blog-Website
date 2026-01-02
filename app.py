@@ -5,8 +5,8 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, redirect, session, url_for, flash, abort
 from flask_pymongo import PyMongo
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, TextAreaField, SubmitField
-from wtforms.validators import DataRequired, Length, Optional
+from wtforms import StringField, PasswordField, TextAreaField, SubmitField, SelectField
+from wtforms.validators import DataRequired, Length, Optional, EqualTo
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 import bleach
@@ -248,9 +248,37 @@ class PostForm(FlaskForm):
     series_name = StringField('Series Name (Optional)', validators=[Optional(), Length(max=100)])
     cover_url = StringField('Cover Image URL', validators=[Optional()])
     tags = StringField('Tags (comma separated)', validators=[Optional()])
+    
+    # New Meta-Data Fields
+    intent = SelectField('Writing Intent', choices=[
+        ('inform', 'Inform (Teach something)'),
+        ('reflect', 'Reflect (Share personal experience)'),
+        ('document', 'Document (Record history/process)'),
+        ('argue', 'Argue (Persuade opinion)')
+    ], validators=[DataRequired()])
+    
+    freshness = SelectField('Content Freshness', choices=[
+        ('current', 'Current (Relevant now)'),
+        ('evergreen', 'Evergreen (Always relevant)'),
+        ('aging', 'Aging (Might be outdated soon)')
+    ], validators=[DataRequired()], default='current')
+
+    why_wrote = TextAreaField('Why I Wrote This (Optional)', validators=[Optional(), Length(max=300)])
+    summary = TextAreaField('Reading Summary (Author Curated)', validators=[Optional(), Length(max=500)])
+    
     content = TextAreaField('Content', validators=[DataRequired()]) # HTML content
     submit = SubmitField('Publish')
     save_draft = SubmitField('Save Draft')
+
+class SettingsAccountForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired()])
+    # Password change fields could be here
+    submit = SubmitField('Update Account')
+
+class SettingsProfileForm(FlaskForm):
+    bio = TextAreaField('Bio', validators=[Optional(), Length(max=300)])
+    avatar_url = StringField('Avatar URL', validators=[Optional()])
+    submit = SubmitField('Update Profile')
 
 class CommentForm(FlaskForm):
     content = TextAreaField('Response', validators=[DataRequired(), Length(max=500)])
@@ -464,13 +492,18 @@ def new_post():
             'title': form.title.data,
             'subtitle': form.subtitle.data,
             'series_name': form.series_name.data,
+            'intent': form.intent.data,
+            'freshness': form.freshness.data,
+            'why_wrote': form.why_wrote.data,
+            'summary': form.summary.data,
             'content': clean_content,
             'cover_url': form.cover_url.data,
             'author': session['user'],
             'tags': tags_list,
             'created_at': datetime.now(timezone.utc),
             'likes': [],
-            'is_draft': is_draft
+            'is_draft': is_draft,
+            'revision_count': 1
         }).inserted_id
         
         if not is_draft:
@@ -631,13 +664,17 @@ def edit_post(post_id):
             'title': form.title.data,
             'subtitle': form.subtitle.data,
             'series_name': form.series_name.data,
+            'intent': form.intent.data,
+            'freshness': form.freshness.data,
+            'why_wrote': form.why_wrote.data,
+            'summary': form.summary.data,
             'content': clean_content,
             'cover_url': form.cover_url.data,
             'tags': tags_list,
             'is_draft': is_draft,
             # Don't update created_at, maybe add updated_at
             'updated_at': datetime.now(timezone.utc)
-        }})
+        }, '$inc': {'revision_count': 1}})
         
         if was_draft and not is_draft:
              log_activity(session['user'], "published a new story", post_id, form.title.data)
@@ -653,6 +690,10 @@ def edit_post(post_id):
         form.title.data = post.get('title')
         form.subtitle.data = post.get('subtitle')
         form.series_name.data = post.get('series_name')
+        form.intent.data = post.get('intent', 'inform')
+        form.freshness.data = post.get('freshness', 'current')
+        form.why_wrote.data = post.get('why_wrote', '')
+        form.summary.data = post.get('summary', '')
         form.cover_url.data = post.get('cover_url')
         form.content.data = post.get('content')
         form.tags.data = ", ".join(post.get('tags', []))
@@ -756,17 +797,22 @@ def profile(username):
     
     return render_template('profile.html', user=user, posts=user_posts, activities=user_activities)
 
-@app.route('/settings', methods=['GET', 'POST'])
+@app.route('/settings')
 def settings():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    return render_template('settings_hub.html')
+
+@app.route('/settings/profile', methods=['GET', 'POST'])
+def settings_profile():
     if 'user' not in session:
         return redirect(url_for('login'))
         
     user = users.find_one({'username': session['user']})
-    form = ProfileForm()
+    form = SettingsProfileForm()
     
     if form.validate_on_submit():
         users.update_one({'username': session['user']}, {'$set': {
-            'email': form.email.data,
             'bio': form.bio.data,
             'avatar_url': form.avatar_url.data
         }})
@@ -774,11 +820,30 @@ def settings():
         return redirect(url_for('profile', username=session['user']))
     
     elif request.method == 'GET':
-        form.email.data = user.get('email', '')
         form.bio.data = user.get('bio', '')
         form.avatar_url.data = user.get('avatar_url', '')
         
-    return render_template('settings.html', form=form)
+    return render_template('settings_profile.html', form=form, user=user)
+
+@app.route('/settings/account', methods=['GET', 'POST'])
+def settings_account():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+        
+    user = users.find_one({'username': session['user']})
+    form = SettingsAccountForm()
+    
+    if form.validate_on_submit():
+        users.update_one({'username': session['user']}, {'$set': {
+            'email': form.email.data
+        }})
+        flash('Account settings updated.', 'success')
+        return redirect(url_for('settings'))
+    
+    elif request.method == 'GET':
+        form.email.data = user.get('email', '')
+        
+    return render_template('settings_account.html', form=form)
 
 if __name__ == '__main__':
     app.run(debug=True)

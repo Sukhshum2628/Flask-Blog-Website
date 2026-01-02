@@ -58,13 +58,39 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
 app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
 
 # Mail Configuration
-app.config['MAIL_SERVER'] = 'smtp.googlemail.com'
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 465
 app.config['MAIL_USE_TLS'] = False
 app.config['MAIL_USE_SSL'] = True
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USER')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASS')
 mail = Mail(app)
+
+# ... (existing code)
+
+@app.route('/test_email')
+def test_email():
+    results = []
+    results.append(f"Testing Email Configuration...")
+    results.append(f"MAIL_SERVER: {app.config['MAIL_SERVER']}")
+    results.append(f"MAIL_PORT: {app.config['MAIL_PORT']}")
+    results.append(f"MAIL_USERNAME: {app.config['MAIL_USERNAME']}")
+    
+    try:
+        sender = app.config['MAIL_USERNAME']
+        if not sender:
+            return "ERROR: MAIL_USER environment variable is NOT SET in Render."
+            
+        msg = Message('Diagnostic Test Email',
+                    sender=sender,
+                    recipients=[sender]) 
+        msg.body = 'This is a diagnostic test to verify SMTP settings on Render.'
+        
+        # SENDING SYNCHRONOUSLY for diagnostics
+        mail.send(msg)
+        return f"SUCCESS! Email sent to {sender}. Check your inbox.<br><br>Details:<br>" + "<br>".join(results)
+    except Exception as e:
+        return f"FAILED to send email.<br>Error: {str(e)}<br><br>Check if your MAIL_PASS is a 16-character Google App Password (not your regular password).<br><br>Details:<br>" + "<br>".join(results)
 
 mongo = PyMongo(app)
 users = mongo.db.users

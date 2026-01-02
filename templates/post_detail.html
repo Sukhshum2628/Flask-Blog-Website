@@ -45,7 +45,11 @@
                         <a href="{{ url_for('profile', username=post.author) }}" class="text-decoration-none text-dark">{{ post.author }}</a>
                     </div>
                     <div class="text-muted small">
-                        {{ post.created_at.strftime('%b %d, %Y') if post.created_at else '' }} · {{ read_time }} min read
+                        {{ post.created_at.strftime('%b %d, %Y') if post.created_at else '' }}
+                        {% if post.updated_at and post.updated_at > post.created_at %}
+                            (Updated {{ post.updated_at|time_ago }})
+                        {% endif %}
+                        · {{ read_time }} min read
                         {% if active_readers > 1 %}
                             · <span class="text-success fw-bold"><i class="bi bi-people-fill"></i> {{ active_readers }} people reading now</span>
                         {% endif %}
@@ -76,15 +80,30 @@
 
         <!-- Interaction -->
         <div class="d-flex justify-content-between align-items-center mb-5">
-            <div>
-                <a href="{{ url_for('like_post', post_id=post._id) }}" class="btn {{ 'btn-dark' if has_liked else 'btn-outline-dark' }} rounded-pill me-2">
-                    <i class="bi bi-hand-thumbs-up-fill"></i> Claps <span class="badge bg-light text-dark ms-1">{{ post.likes|default([])|length }}</span>
-                </a>
-                
-                <a href="{{ url_for('bookmark_post', post_id=post._id) }}" class="btn {{ 'btn-dark' if is_bookmarked else 'btn-outline-secondary' }} rounded-pill" title="{{ 'Remove from Reading List' if is_bookmarked else 'Save to Reading List' }}">
-                    <i class="bi {{ 'bi-bookmark-fill' if is_bookmarked else 'bi-bookmark' }}"></i>
-                </a>
+            <div class="btn-group dropup">
+                <button type="button" class="btn btn-outline-dark rounded-pill dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                    {% if user_reaction == 'like' %}👍{% elif user_reaction == 'love' %}❤️{% elif user_reaction == 'insightful' %}💡{% elif user_reaction == 'funny' %}😂{% else %}<i class="bi bi-emoji-smile"></i> React{% endif %}
+                    <span class="badge bg-dark text-white ms-1">{{ reaction_counts.values()|sum }}</span>
+                </button>
+                <ul class="dropdown-menu p-2 text-center" style="min-width: 200px;">
+                    <li class="d-inline-block">
+                        <a class="dropdown-item px-2 d-inline" href="{{ url_for('react_post', post_id=post._id, reaction_type='like') }}" title="Like">👍 <span class="small text-muted">{{ reaction_counts.get('like', 0) }}</span></a>
+                    </li>
+                    <li class="d-inline-block">
+                        <a class="dropdown-item px-2 d-inline" href="{{ url_for('react_post', post_id=post._id, reaction_type='love') }}" title="Love">❤️ <span class="small text-muted">{{ reaction_counts.get('love', 0) }}</span></a>
+                    </li>
+                    <li class="d-inline-block">
+                        <a class="dropdown-item px-2 d-inline" href="{{ url_for('react_post', post_id=post._id, reaction_type='insightful') }}" title="Insightful">💡 <span class="small text-muted">{{ reaction_counts.get('insightful', 0) }}</span></a>
+                    </li>
+                    <li class="d-inline-block">
+                        <a class="dropdown-item px-2 d-inline" href="{{ url_for('react_post', post_id=post._id, reaction_type='funny') }}" title="Funny">😂 <span class="small text-muted">{{ reaction_counts.get('funny', 0) }}</span></a>
+                    </li>
+                </ul>
             </div>
+                
+            <a href="{{ url_for('bookmark_post', post_id=post._id) }}" class="btn {{ 'btn-dark' if is_bookmarked else 'btn-outline-secondary' }} rounded-pill" title="{{ 'Remove from Reading List' if is_bookmarked else 'Save to Reading List' }}">
+                <i class="bi {{ 'bi-bookmark-fill' if is_bookmarked else 'bi-bookmark' }}"></i>
+            </a>
             <!-- Share buttons could go here -->
         </div>
 
@@ -142,15 +161,25 @@
             {% endif %}
 
             {% for comment in comments %}
-                <div class="d-flex mb-4">
-                    <div class="flex-shrink-0">
+                <div class="d-flex mb-4 {{ 'bg-light p-3 rounded' if comment.is_pinned else '' }}">
+                    <div class="flex-shrink-0 position-relative">
                         <img src="https://ui-avatars.com/api/?name={{ comment.author }}&background=random" 
                              class="rounded-circle" width="40" height="40" alt="{{ comment.author }}">
+                        {% if comment.is_pinned %}
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark">
+                                <i class="bi bi-pin-fill"></i>
+                            </span>
+                        {% endif %}
                     </div>
                     <div class="flex-grow-1 ms-3">
-                        <div class="mb-1">
-                            <span class="fw-bold">{{ comment.author }}</span>
-                            <small class="text-muted ms-2">{{ comment.created_at.strftime('%b %d') if comment.created_at else '' }}</small>
+                        <div class="mb-1 d-flex align-items-center">
+                            <span class="fw-bold me-2">{{ comment.author }}</span>
+                            <small class="text-muted">{{ comment.created_at.strftime('%b %d') if comment.created_at else '' }}</small>
+                            {% if is_author %}
+                                <a href="{{ url_for('pin_comment', comment_id=comment._id) }}" class="ms-auto text-secondary" title="{{ 'Unpin' if comment.is_pinned else 'Pin' }}">
+                                    <i class="bi {{ 'bi-pin-fill text-warning' if comment.is_pinned else 'bi-pin-angle' }}"></i>
+                                </a>
+                            {% endif %}
                         </div>
                         <p class="mb-0">{{ comment.content }}</p>
                     </div>
@@ -176,12 +205,14 @@
 
 <script>
     const postId = "{{ post._id }}";
+    // Prefer server progress if available, else local
+    const serverProgress = {{ server_progress|default(0) }};
     const storageKey = "read_progress_" + postId;
     
     // Existing Progress Bar
     window.onscroll = function() { 
         updateProgressBar();
-        saveProgress();
+        saveProgressDebounced();
     };
 
     function updateProgressBar() {
@@ -191,18 +222,39 @@
         document.getElementById("myBar").style.width = scrolled + "%";
     }
 
-    // New: Save/Restore Progress
+    let timeout;
+    function saveProgressDebounced() {
+        clearTimeout(timeout);
+        timeout = setTimeout(saveProgress, 1000);
+    }
+
     function saveProgress() {
-        // Debounce or just save
         var winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+        // Save to local
         localStorage.setItem(storageKey, winScroll);
+        
+        // Save to server
+        fetch(`/api/save_progress/${postId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ progress: winScroll })
+        });
     }
 
     document.addEventListener("DOMContentLoaded", function() {
-        const savedPosition = localStorage.getItem(storageKey);
-        if (savedPosition && parseInt(savedPosition) > 100) {
+        // Decide start position: Server > Local
+        let startPos = serverProgress;
+        const localPos = localStorage.getItem(storageKey);
+        
+        if (localPos && parseInt(localPos) > startPos) {
+             startPos = parseInt(localPos);
+        }
+
+        if (startPos > 100) {
             window.scrollTo({
-                top: parseInt(savedPosition),
+                top: startPos,
                 behavior: 'smooth'
             });
             

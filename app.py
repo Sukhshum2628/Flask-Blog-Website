@@ -71,6 +71,7 @@ posts = mongo.db.posts
 comments = mongo.db.comments
 activities = mongo.db.activities
 reading_sessions = mongo.db.reading_sessions
+reading_history = mongo.db.reading_history
 
 # Global Cache for Trending Posts
 TRENDING_CACHE = {
@@ -105,6 +106,21 @@ def get_trending_posts():
         TRENDING_CACHE['last_updated'] = now
         
     return TRENDING_CACHE['data']
+
+@app.route('/api/save_progress/<post_id>', methods=['POST'])
+def save_progress(post_id):
+    if 'user' not in session:
+        return {'status': 'ignored'}, 200
+    
+    data = request.get_json()
+    progress = data.get('progress', 0)
+    
+    reading_history.update_one(
+        {'user': session['user'], 'post_id': ObjectId(post_id)},
+        {'$set': {'progress': progress, 'updated_at': datetime.now(timezone.utc)}},
+        upsert=True
+    )
+    return {'status': 'saved'}, 200
 
 # Ensure indexes
 try:
@@ -247,16 +263,73 @@ class ProfileForm(FlaskForm):
     submit = SubmitField('Save Profile')
 
 # Routes
+
+def get_recommended_posts(user_id=None):
+    # 1. If user is logged in, find their top tags from reading history/likes
+    # For now, simplistic approach: Random sample of popular posts (excluding current trending to avoid dupe if possible)
+    # In a real app, aggregation pipeline on user's activities would be best.
+    pipeline = [
+        {'$match': {'is_draft': {'$ne': True}}},
+        {'$sample': {'size': 5}}
+    ]
+    return list(posts.aggregate(pipeline))
+
+@app.route('/search/suggestions')
+def search_suggestions():
+    query = request.args.get('q', '')
+    if not query or len(query) < 2:
+        return {'results': []}
+    
+    # Regex search for title or tags
+    # Limit to 5 results
+    regex = re.compile(query, re.IGNORECASE)
+    results = posts.find({
+        '$or': [
+            {'title': regex},
+            {'tags': regex}
+        ],
+        'is_draft': {'$ne': True}
+    }, {'title': 1, '_id': 1}).limit(5)
+    
+    suggestions = [{'title': p['title'], 'id': str(p['_id'])} for p in results]
+    return {'results': suggestions}
+
 @app.route('/')
 def index():
     page = int(request.args.get('page', 1))
+    tab = request.args.get('tab', 'latest')
     per_page = 5
     
-    # Show latest posts with pagination (excluding drafts)
+    trending_posts = get_trending_posts()
+    recommended_posts = []
+
     query = {'is_draft': {'$ne': True}}
-    total_posts = posts.count_documents(query)
-    all_posts_cursor = posts.find(query).sort("created_at", -1).skip((page - 1) * per_page).limit(per_page)
-    all_posts = list(all_posts_cursor)
+
+    if tab == 'trending':
+        # Re-use trending logic but paginated? 
+        # For simplicity, let's just use the cached trending data as the "list"
+        # Or sorting by views/likes via DB query for pagination support
+        all_posts_cursor = posts.find(query).sort("views", -1).skip((page - 1) * per_page).limit(per_page)
+        
+    elif tab == 'recommended':
+        # Recommended doesn't paginate well with random sampling, so we'll just fetch one batch
+        if 'user' in session:
+            # Complex recommendation logic could go here
+            pass
+        all_posts_cursor = get_recommended_posts() # Returns list, not cursor
+        # Mock pagination behavior
+        all_posts_cursor = all_posts_cursor # It's a list
+        
+    else: # latest
+        all_posts_cursor = posts.find(query).sort("created_at", -1).skip((page - 1) * per_page).limit(per_page)
+
+    # Handle list vs cursor
+    if isinstance(all_posts_cursor, list):
+        all_posts = all_posts_cursor
+        total_posts = len(all_posts) # Approximate for recommended
+    else:
+        all_posts = list(all_posts_cursor)
+        total_posts = posts.count_documents(query)
     
     for post in all_posts:
         clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
@@ -264,9 +337,7 @@ def index():
         
     total_pages = math.ceil(total_posts / per_page)
     
-    trending_posts = get_trending_posts()
-    
-    return render_template('index.html', posts=all_posts, page=page, total_pages=total_pages, trending_posts=trending_posts)
+    return render_template('index.html', posts=all_posts, page=page, total_pages=total_pages, trending_posts=trending_posts, current_tab=tab)
 
 @app.route('/search')
 def search():
@@ -431,8 +502,8 @@ def view_post(post_id):
         if 'user' not in session or session['user'] != post['author']:
             abort(403) # Forbidden
     
-    # Comments
-    post_comments = list(comments.find({'post_id': ObjectId(post_id)}).sort("created_at", -1))
+    # Comments - sorted by pinned first, then new
+    post_comments = list(comments.find({'post_id': ObjectId(post_id)}).sort([("is_pinned", -1), ("created_at", -1)]))
     
     # Comment Form
     form = CommentForm()
@@ -441,7 +512,8 @@ def view_post(post_id):
             'post_id': ObjectId(post_id),
             'author': session['user'],
             'content': form.content.data,
-            'created_at': datetime.now(timezone.utc)
+            'created_at': datetime.now(timezone.utc),
+            'is_pinned': False
         })
         # Increment comment count for trending logic
         posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'comment_count': 1}})
@@ -454,14 +526,31 @@ def view_post(post_id):
     read_time = get_reading_time(clean_text)
 
     is_author = 'user' in session and session['user'] == post['author']
-    has_liked = 'user' in session and session['user'] in post.get('likes', [])
+    
+    # Process Reactions
+    reactions = post.get('reactions', {})
+    # Backfill legacy likes if needed (optional, or just ignore legacy)
+    legacy_likes = post.get('likes', [])
+    if legacy_likes and not reactions:
+        reactions = {u: 'like' for u in legacy_likes}
+    
+    user_reaction = reactions.get(session['user']) if 'user' in session else None
+    reaction_counts = {}
+    for r in reactions.values():
+        reaction_counts[r] = reaction_counts.get(r, 0) + 1
 
     # Check if bookmarked
     is_bookmarked = False
+    server_progress = 0
     if 'user' in session:
         user = users.find_one({'username': session['user']})
         saved = user.get('saved_posts', [])
         is_bookmarked = ObjectId(post_id) in saved
+
+        # Get reading progress
+        hist = reading_history.find_one({'user': session['user'], 'post_id': ObjectId(post_id)})
+        if hist:
+            server_progress = hist.get('progress', 0)
     
     # Track Reading Session
     # Use session ID or username to avoid counting same user twice
@@ -495,7 +584,7 @@ def view_post(post_id):
             'created_at': {'$gt': post['created_at']}
         }, sort=[('created_at', 1)])
 
-    return render_template('post_detail.html', post=post, author=author, comments=post_comments, form=form, read_time=read_time, is_author=is_author, has_liked=has_liked, is_bookmarked=is_bookmarked, active_readers=active_readers, series_prev=series_prev, series_next=series_next)
+    return render_template('post_detail.html', post=post, author=author, comments=post_comments, form=form, read_time=read_time, is_author=is_author, user_reaction=user_reaction, reaction_counts=reaction_counts, is_bookmarked=is_bookmarked, active_readers=active_readers, series_prev=series_prev, series_next=series_next, server_progress=server_progress)
 
 @app.route('/post/<post_id>/bookmark')
 def bookmark_post(post_id):
@@ -581,20 +670,50 @@ def delete_post(post_id):
         
     return redirect(url_for('dashboard'))
 
-@app.route('/post/<post_id>/like')
-def like_post(post_id):
+@app.route('/post/<post_id>/react/<reaction_type>')
+def react_post(post_id, reaction_type):
     if 'user' not in session:
         return redirect(url_for('login'))
         
+    allowed_reactions = ['like', 'love', 'insightful', 'funny']
+    if reaction_type not in allowed_reactions:
+        flash('Invalid reaction.', 'danger')
+        return redirect(url_for('view_post', post_id=post_id))
+
     post = posts.find_one({'_id': ObjectId(post_id)})
     if post:
-        if session['user'] in post.get('likes', []):
-            posts.update_one({'_id': ObjectId(post_id)}, {'$pull': {'likes': session['user']}})
+        # Structure: reactions = { 'username': 'type', ... }
+        current_reactions = post.get('reactions', {})
+        
+        # Toggle logic: if clicking same reaction, remove it. If different, update it.
+        if session['user'] in current_reactions and current_reactions[session['user']] == reaction_type:
+            del current_reactions[session['user']]
         else:
-            posts.update_one({'_id': ObjectId(post_id)}, {'$addToSet': {'likes': session['user']}})
-            log_activity(session['user'], "liked", post_id, post['title'])
+            current_reactions[session['user']] = reaction_type
+            log_activity(session['user'], f"reacted with {reaction_type} to", post_id, post['title'])
+            
+        posts.update_one({'_id': ObjectId(post_id)}, {'$set': {'reactions': current_reactions}})
             
     return redirect(url_for('view_post', post_id=post_id))
+
+@app.route('/comment/<comment_id>/pin')
+def pin_comment(comment_id):
+    if 'user' not in session:
+        return redirect(url_for('login'))
+        
+    comment = comments.find_one({'_id': ObjectId(comment_id)})
+    if not comment:
+        abort(404)
+        
+    post = posts.find_one({'_id': comment['post_id']})
+    if not post or post['author'] != session['user']:
+        abort(403) # Only post author can pin
+        
+    # Toggle pin
+    new_state = not comment.get('is_pinned', False)
+    comments.update_one({'_id': ObjectId(comment_id)}, {'$set': {'is_pinned': new_state}})
+    
+    return redirect(url_for('view_post', post_id=post['_id']))
 
 @app.route('/dashboard')
 def dashboard():
@@ -625,8 +744,12 @@ def profile(username):
     if not user:
         abort(404)
         
-    user_posts = posts.find({'author': username}).sort("created_at", -1)
-    return render_template('profile.html', user=user, posts=list(user_posts))
+    user_posts = list(posts.find({'author': username, 'is_draft': {'$ne': True}}).sort("created_at", -1))
+    
+    # Fetch recent activities
+    user_activities = list(activities.find({'user': username}).sort("timestamp", -1).limit(10))
+    
+    return render_template('profile.html', user=user, posts=user_posts, activities=user_activities)
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():

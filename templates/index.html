@@ -13,61 +13,90 @@
 
         {% if search_query %}
             <h3 class="mb-4 text-muted">Results for "{{ search_query }}"</h3>
+        {% else %}
+            <!-- Navigation Tabs -->
+            <ul class="nav nav-pills mb-4 pb-2 border-bottom">
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active bg-dark' if current_tab == 'latest' else 'text-muted' }}" href="{{ url_for('index', tab='latest') }}">Latest</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active bg-dark' if current_tab == 'trending' else 'text-muted' }}" href="{{ url_for('index', tab='trending') }}">Trending</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active bg-dark' if current_tab == 'recommended' else 'text-muted' }}" href="{{ url_for('index', tab='recommended') }}">Recommended</a>
+                </li>
+            </ul>
         {% endif %}
 
-        {% for post in posts %}
-            <div class="card border-0 mb-5 card-hover" data-aos="fade-up">
-                <div class="card-body p-0">
-                    <div class="d-flex align-items-center mb-3">
-                        <img src="https://ui-avatars.com/api/?name={{ post.author }}&background=random" 
-                             class="rounded-circle me-2" width="24" height="24" alt="{{ post.author }}">
-                        <a href="{{ url_for('profile', username=post.author) }}" class="text-dark text-decoration-none fw-bold small me-2">{{ post.author }}</a>
-                        <span class="text-muted small">{{ post.created_at.strftime('%b %d') if post.created_at else '' }}</span>
-                    </div>
-
-                    <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
-                        <div class="row flex-row-reverse flex-md-row">
-                            <div class="col-md-8">
-                                <h2 class="fw-bold mb-1 h3">{{ post.title }}</h2>
-                                <h5 class="text-muted fw-normal mb-2 small">{{ post.subtitle or post.content|striptags|truncate(100) }}</h5>
-                            </div>
-                            <div class="col-md-4 mb-3 mb-md-0">
-                                {% if post.cover_url %}
-                                    <img src="{{ post.cover_url }}" class="img-fluid rounded" style="height: 100px; width: 100%; object-fit: cover;" alt="Cover">
-                                {% else %}
-                                    <div class="rounded w-100" style="height: 100px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);"></div>
-                                {% endif %}
-                            </div>
+        {% if posts %}
+            {% for post in posts %}
+                <div class="card border-0 mb-5 card-hover" data-aos="fade-up">
+                    <div class="card-body p-0">
+                        <div class="d-flex align-items-center mb-3">
+                            <img src="https://ui-avatars.com/api/?name={{ post.author }}&background=random" 
+                                 class="rounded-circle me-2" width="24" height="24" alt="{{ post.author }}">
+                            <a href="{{ url_for('profile', username=post.author) }}" class="text-dark text-decoration-none fw-bold small me-2">{{ post.author }}</a>
+                            <span class="text-muted small">{{ post.created_at.strftime('%b %d') if post.created_at else '' }}</span>
                         </div>
-                    </a>
-                    
-                    <div class="d-flex align-items-center mt-3">
-                        <span class="badge bg-light text-secondary rounded-pill me-3 fw-normal">{{ post.read_time }} min read</span>
-                        {% for tag in (post.tags|default([]))[:3] %}
-                             <span class="badge bg-light text-secondary rounded-pill me-1 fw-normal">{{ tag }}</span>
-                        {% endfor %}
+
+                        <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
+                            <div class="row flex-row-reverse flex-md-row">
+                                <div class="col-md-8">
+                                    <h2 class="fw-bold mb-1 h3">{{ post.title }}</h2>
+                                    <h5 class="text-muted fw-normal mb-2 small">{{ post.subtitle or post.content|striptags|truncate(100) }}</h5>
+                                </div>
+                                <div class="col-md-4 mb-3 mb-md-0">
+                                    {% if post.cover_url %}
+                                        <img src="{{ post.cover_url }}" class="img-fluid rounded" style="height: 100px; width: 100%; object-fit: cover;" alt="Cover">
+                                    {% else %}
+                                        <div class="rounded w-100" style="height: 100px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);"></div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </a>
                         
-                        <div class="ms-auto text-muted small">
-                            <i class="bi bi-hand-thumbs-up"></i> {{ post.likes|default([])|length }}
+                        <div class="d-flex align-items-center mt-3">
+                            <span class="badge bg-light text-secondary rounded-pill me-3 fw-normal">{{ post.read_time }} min read</span>
+                            {% for tag in (post.tags|default([]))[:3] %}
+                                 <span class="badge bg-light text-secondary rounded-pill me-1 fw-normal">{{ tag }}</span>
+                            {% endfor %}
+                            
+                            <div class="ms-auto text-muted small">
+                                <i class="bi bi-hand-thumbs-up"></i> {{ post.likes|default([])|length }}
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            {% endfor %}
         {% else %}
+            <!-- Smart Empty State -->
             <div class="text-center py-5">
-                <p class="text-muted">No stories found.</p>
+                <div class="mb-3">
+                    <i class="bi bi-journal-x text-muted" style="font-size: 3rem;"></i>
+                </div>
+                <h5 class="fw-bold text-secondary">No stories found here.</h5>
+                <p class="text-muted small mb-4">
+                    {% if current_tab == 'trending' %}
+                        Be the first to create a hit story!
+                    {% elif current_tab == 'recommended' %}
+                        Interact with more posts to get better recommendations.
+                    {% else %}
+                        It's a bit quiet right now. Why not write something?
+                    {% endif %}
+                </p>
+                <a href="{{ url_for('new_post') }}" class="btn btn-outline-dark rounded-pill px-4">Write a Story</a>
             </div>
-        {% endfor %}
+        {% endif %}
 
         <!-- Pagination -->
-        {% if total_pages and total_pages > 1 %}
+        {% if total_pages and total_pages > 1 and current_tab != 'recommended' %}
             <nav class="mt-5">
                 <ul class="pagination justify-content-center">
                     <li class="page-item {{ 'disabled' if page == 1 }}">
-                        <a class="page-link border-0 text-dark" href="{{ url_for('index', page=page-1) }}"><i class="bi bi-chevron-left"></i> Newer</a>
+                        <a class="page-link border-0 text-dark" href="{{ url_for('index', page=page-1, tab=current_tab) }}"><i class="bi bi-chevron-left"></i> Newer</a>
                     </li>
                     <li class="page-item {{ 'disabled' if page == total_pages }}">
-                        <a class="page-link border-0 text-dark" href="{{ url_for('index', page=page+1) }}">Older <i class="bi bi-chevron-right"></i></a>
+                        <a class="page-link border-0 text-dark" href="{{ url_for('index', page=page+1, tab=current_tab) }}">Older <i class="bi bi-chevron-right"></i></a>
                     </li>
                 </ul>
             </nav>
@@ -76,6 +105,17 @@
 
     <!-- Sidebar: Activity Feed -->
     <div class="col-lg-4 ps-lg-5 mt-5 mt-lg-0">
+        <!-- Search Widget -->
+        <div class="mb-5 position-relative">
+            <form action="{{ url_for('search') }}" method="get" autocomplete="off">
+                <div class="input-group border-bottom">
+                    <span class="input-group-text bg-transparent border-0 ps-0"><i class="bi bi-search"></i></span>
+                    <input type="text" name="q" id="searchInput" class="form-control border-0 bg-transparent shadow-none" placeholder="Search stories...">
+                </div>
+                <div id="searchSuggestions" class="list-group position-absolute w-100 shadow-sm" style="display:none; z-index: 1000; top: 100%;"></div>
+            </form>
+        </div>
+
         <div class="sticky-top" style="top: 100px; z-index: 100;">
             <h6 class="text-uppercase fw-bold small mb-4">Recent Activity</h6>
             
@@ -98,8 +138,13 @@
                     {% endfor %}
                 </div>
             {% else %}
-                <p class="small text-muted mb-5">No recent activity.</p>
+                 <!-- Empty State for Activity -->
+                 <div class="text-center py-4 mb-5 border rounded bg-light">
+                     <i class="bi bi-activity text-muted mb-2 fs-4"></i>
+                     <p class="small text-muted mb-0">No recent activity.</p>
+                 </div>
             {% endif %}
+
 
             <div class="p-4 bg-light rounded-3 mb-5">
                 <h6 class="fw-bold mb-2">Write on FlaskBlog</h6>
@@ -151,5 +196,56 @@
         100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(25, 135, 84, 0); }
     }
     .x-small { font-size: 0.75rem; }
+    
+    .list-group-item-action:hover {
+        background-color: #f8f9fa;
+    }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    const suggestionsBox = document.getElementById('searchSuggestions');
+    
+    let timeout = null;
+    
+    searchInput.addEventListener('input', function() {
+        const query = this.value;
+        
+        clearTimeout(timeout);
+        
+        if (query.length < 2) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+        
+        timeout = setTimeout(() => {
+            fetch(`/search/suggestions?q=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    suggestionsBox.innerHTML = '';
+                    if (data.results.length > 0) {
+                        data.results.forEach(item => {
+                            const a = document.createElement('a');
+                            a.href = `/post/${item.id}`;
+                            a.className = 'list-group-item list-group-item-action small border-0';
+                            a.textContent = item.title;
+                            suggestionsBox.appendChild(a);
+                        });
+                        suggestionsBox.style.display = 'block';
+                    } else {
+                        suggestionsBox.style.display = 'none';
+                    }
+                });
+        }, 300);
+    });
+    
+    // Hide suggestions when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!searchInput.contains(e.target) && !suggestionsBox.contains(e.target)) {
+            suggestionsBox.style.display = 'none';
+        }
+    });
+});
+</script>
 {% endblock %}

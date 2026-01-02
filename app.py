@@ -13,7 +13,6 @@ import bleach
 from dotenv import load_dotenv
 
 import threading
-from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer as Serializer
 
 # ... (rest of imports)
@@ -33,10 +32,6 @@ def send_digest_email(user_email, username, last_visit):
         if not new_posts and new_comments == 0:
             return # Nothing new to report
 
-        msg = Message('While you were away...',
-                      sender='noreply@flaskblog.com',
-                      recipients=[user_email])
-        
         body = f"Hi {username}!\n\n"
         if new_comments > 0:
             body += f"You have {new_comments} new responses to your stories.\n\n"
@@ -47,8 +42,9 @@ def send_digest_email(user_email, username, last_visit):
                 body += f"- {p['title']} by {p['author']}\n"
         
         body += f"\nSee everything at: {url_for('index', _external=True)}"
-        msg.body = body
-        mail.send(msg)
+        
+        # Use Brevo API
+        send_email_brevo(user_email, "While you were away...", body)
 
 # Load environment variables
 load_dotenv()
@@ -264,28 +260,6 @@ def verify_reset_token(token, expires_sec=1800):
     except:
         return None
     return users.find_one({'_id': ObjectId(user_id)})
-
-def send_async_email(app, msg):
-    with app.app_context():
-        try:
-            mail.send(msg)
-            print(f"SUCCESS: Email sent to {msg.recipients}", flush=True)
-        except Exception as e:
-            print(f"ERROR: Failed to send email: {e}", flush=True)
-
-def send_reset_email(user):
-    print(f"Attempting to send reset email to: {user['email']}", flush=True)
-    token = get_reset_token(user['_id'])
-    msg = Message('Password Reset Request',
-                  sender=os.environ.get('MAIL_USER'),
-                  recipients=[user['email']])
-    msg.body = f'''To reset your password, visit the following link:
-{url_for('reset_token', token=token, _external=True)}
-
-If you did not make this request then simply ignore this email and no changes will be made.
-'''
-    # Send in background thread to avoid timeout
-    threading.Thread(target=send_async_email, args=(app, msg)).start()
 
 # Context Processor for User Info in Navbar
 @app.context_processor

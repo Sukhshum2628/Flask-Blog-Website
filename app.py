@@ -531,7 +531,7 @@ def reset_request():
         user = users.find_one({'email': form.email.data})
         if user:
             send_reset_email(user)
-        flash('An email has been sent with instructions to reset your password.', 'info')
+        flash('An email has been sent with instructions to reset your password. (Please check your Spam/Junk folder if you do not see it)', 'info')
         return redirect(url_for('login'))
     return render_template('reset_request.html', form=form)
 

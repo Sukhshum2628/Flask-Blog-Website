@@ -175,6 +175,10 @@ def get_trending_posts():
         
     return TRENDING_CACHE['data']
 
+@app.route('/health')
+def health_check():
+    return "OK", 200
+
 @app.route('/api/save_progress/<post_id>', methods=['POST'])
 def save_progress(post_id):
     if 'user' not in session:

@@ -709,46 +709,55 @@ def bookmark_post(post_id):
 # AI Routes
 @app.route('/ai/summarize/<post_id>', methods=['POST'])
 def ai_summarize(post_id):
-    if 'user' not in session:
-        return {'error': 'Unauthorized'}, 401
-    
-    post = posts.find_one({'_id': ObjectId(post_id)})
-    if not post:
-        return {'error': 'Post not found'}, 404
-        
-    summary = ai_service.summarize_text(post.get('content', ''))
-    return {'summary': summary}
+    # Public route: removed 'user' in session check
+    try:
+        post = posts.find_one({'_id': ObjectId(post_id)})
+        if not post:
+            return {'error': 'Post not found'}, 404
+            
+        summary = ai_service.summarize_text(post.get('content', ''))
+        return {'summary': summary}
+    except Exception as e:
+        print(f"AI SUMMARIZE ERROR: {e}", flush=True)
+        return {'error': str(e)}, 500
 
 @app.route('/ai/ask/<post_id>', methods=['POST'])
 def ai_ask(post_id):
-    if 'user' not in session:
-        return {'error': 'Unauthorized'}, 401
-    
-    data = request.get_json()
-    question = data.get('question')
-    if not question:
-        return {'error': 'Question is required'}, 400
-        
-    post = posts.find_one({'_id': ObjectId(post_id)})
-    if not post:
-        return {'error': 'Post not found'}, 404
-        
-    clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-    answer = ai_service.answer_question(clean_text, question)
-    return {'answer': answer}
+    # Public route: removed 'user' in session check
+    try:
+        data = request.get_json()
+        question = data.get('question')
+        if not question:
+            return {'error': 'Question is required'}, 400
+            
+        post = posts.find_one({'_id': ObjectId(post_id)})
+        if not post:
+            return {'error': 'Post not found'}, 404
+            
+        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+        answer = ai_service.answer_question(clean_text, question)
+        return {'answer': answer}
+    except Exception as e:
+        print(f"AI ASK ERROR: {e}", flush=True)
+        return {'error': str(e)}, 500
 
 @app.route('/ai/research', methods=['POST'])
 def ai_research():
+    # Protected route: only authors research in editor
     if 'user' not in session:
         return {'error': 'Unauthorized'}, 401
-        
-    data = request.get_json()
-    topic = data.get('topic')
-    if not topic:
-        return {'error': 'Topic is required'}, 400
-        
-    result = ai_service.research_topic(topic)
-    return result
+    
+    try:
+        data = request.get_json()
+        topic = data.get('topic')
+        if not topic:
+            return {'error': 'Topic is required'}, 400
+            
+        result = ai_service.research_topic(topic)
+        return result
+    except Exception as e:
+        print(f"AI RESEARCH ERROR: {e}", flush=True)
+        return {'error': str(e)}, 500
 
 @app.route('/post/<post_id>/edit', methods=['GET', 'POST'])
 def edit_post(post_id):

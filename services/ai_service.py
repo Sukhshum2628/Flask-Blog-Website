@@ -13,9 +13,14 @@ AI_MODEL = "stepfun-ai/step-3.5-flash"
 # Tavily Configuration
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 
+if not AI_API_KEY:
+    print("WARNING: AI_API_KEY not found in environment.", flush=True)
+if not TAVILY_API_KEY:
+    print("WARNING: TAVILY_API_KEY not found in environment.", flush=True)
+
 client = OpenAI(
     base_url=AI_BASE_URL,
-    api_key=AI_API_KEY
+    api_key=AI_API_KEY or "missing"
 )
 
 def summarize_text(text):

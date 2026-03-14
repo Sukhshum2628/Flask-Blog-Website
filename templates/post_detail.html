@@ -62,27 +62,46 @@
         padding: 2px 4px;
         border-radius: 4px;
     }
-    /* Citation Highlight */
-    .ai-highlight {
-        background-color: #fff3cd;
-        transition: background-color 0.5s ease;
-        border-radius: 4px;
-        padding: 2px;
+    /* Citation Highlight - Subtle */
+    .ai-content-section {
+        transition: all 0.5s ease;
+        border-left: 3px solid transparent;
+        padding-left: 10px;
+        margin-left: -13px;
     }
     .ai-highlight-active {
-        background-color: #ffe066;
-        box-shadow: 0 0 10px rgba(255, 224, 102, 0.5);
-    }
-    .ai-citation {
-        cursor: pointer;
-        color: #0d6efd;
-        font-weight: bold;
-        text-decoration: none;
-        padding: 0 2px;
-        border-radius: 3px;
+        background-color: #fff3cd; /* Subtle mark-like color */
+        border-left-color: #ffc107;
     }
     .ai-citation:hover {
         background-color: #e9ecef;
+    }
+    /* Sources Panel */
+    .ai-sources-panel {
+        background: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        margin: -8px -8px 10px -8px;
+        padding: 8px;
+        border-radius: 8px 8px 0 0;
+    }
+    .source-tag {
+        display: inline-block;
+        font-size: 10px;
+        background: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 10px;
+        margin-right: 5px;
+        margin-bottom: 5px;
+        color: #495057;
+        text-decoration: none;
+        max-width: 150px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .source-tag:hover {
+        background: #dee2e6;
+        color: #212529;
     }
 </style>
 {% endblock %}
@@ -493,13 +512,28 @@
             const aiMsg = document.createElement('div');
             aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small';
             
-            // Render Markdown
+            // Render Sources Panel if available
+            if (data.sources && data.sources.length > 0) {
+                const sourcesDiv = document.createElement('div');
+                sourcesDiv.className = 'ai-sources-panel';
+                sourcesDiv.innerHTML = '<div class="fw-bold mb-1" style="font-size: 10px; color: #6c757d;">SOURCES</div>';
+                data.sources.forEach((s, idx) => {
+                    sourcesDiv.innerHTML += `<a href="${s.url}" target="_blank" class="source-tag" title="${s.title}">[${idx+1}] ${s.title}</a>`;
+                });
+                aiMsg.appendChild(sourcesDiv);
+            }
+            
+            // Render Markdown Answer
             let answer = data.answer || "Sorry, I couldn't get an answer.";
             
             // Transform [n] citations into clickable buttons
             answer = answer.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
             
-            aiMsg.innerHTML = marked.parse(answer);
+            const answerDiv = document.createElement('div');
+            answerDiv.className = 'ai-answer-content';
+            answerDiv.innerHTML = marked.parse(answer);
+            aiMsg.appendChild(answerDiv);
+            
             body.appendChild(aiMsg);
             body.scrollTop = body.scrollHeight;
         } catch (e) {
@@ -516,7 +550,7 @@
             const paragraphs = postContent.querySelectorAll('p');
             paragraphs.forEach((p, index) => {
                 p.id = `section-${index + 1}`;
-                p.classList.add('ai-highlight');
+                p.classList.add('ai-content-section');
             });
         }
     });

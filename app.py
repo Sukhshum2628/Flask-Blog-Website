@@ -735,8 +735,8 @@ def ai_ask(post_id):
             return {'error': 'Post not found'}, 404
             
         clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-        answer = ai_service.answer_question(clean_text, question)
-        return {'answer': answer}
+        result = ai_service.answer_question(clean_text, question)
+        return result
     except Exception as e:
         print(f"AI ASK ERROR: {e}", flush=True)
         return {'error': str(e)}, 500

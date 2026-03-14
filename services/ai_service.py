@@ -88,7 +88,7 @@ def answer_question(context, question):
             
             for result in search_results:
                 search_context += f"Web Snippet from {result['url']}: {result['content']}\n\n"
-                sources_list.append(f"1. [{result['title']}]({result['url']})")
+                sources_list.append({"title": result['title'], "url": result['url']})
         except Exception as e:
             print(f"AI ERROR (Tavily): {e}", flush=True)
 
@@ -102,7 +102,7 @@ def answer_question(context, question):
         "2. STRUCTURE: Use the following headers:\n"
         "### Summary\n[Concise answer with bullet points and citations]\n\n"
         "### Additional Context\n[Short explanation with insights from research]\n\n"
-        "### Relevant Sources\n[List of source titles with links if available]"
+        "DO NOT include a 'Sources' or 'References' section in your response text, as they will be displayed separately."
     )
 
     user_content = f"Blog Post Content (Numbered Sections):\n{chunked_context_str}\n\n"
@@ -124,14 +124,16 @@ def answer_question(context, question):
         
         answer = completion.choices[0].message.content
         
-        # Append sources if LLM didn't include them properly
-        if search_context and "### Relevant Sources" not in answer:
-            answer += "\n\n### Relevant Sources\n" + "\n".join(sources_list)
-            
-        return answer
+        return {
+            "answer": answer,
+            "sources": sources_list
+        }
     except Exception as e:
         print(f"AI ERROR (LLM): {e}", flush=True)
-        return "Failed to get an answer from AI. Please try again later."
+        return {
+            "answer": "Failed to get an answer from AI. Please try again later.",
+            "sources": []
+        }
 
 def research_topic(topic):
     """Uses Tavily to search the web and the LLM to summarize findings."""

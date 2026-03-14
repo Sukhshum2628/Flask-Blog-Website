@@ -94,22 +94,30 @@ def answer_question(context, question):
 
     # 2. Prepare the LLM prompt
     system_prompt = (
-        "You are a helpful AI research assistant. Answer the user's question using the provided blog content "
-        "(which is divided into numbered sections) and any relevant web search results. "
-        "Strictly follow these rules:\n"
-        "1. GROUNDING: Use the numbered sections from the blog post [1], [2], etc., to support your answer. "
-        "Include the bracketed number immediately after the sentence it supports.\n"
-        "2. STRUCTURE: Use the following headers:\n"
-        "### Summary\n[Concise answer with bullet points and citations]\n\n"
-        "### Additional Context\n[Short explanation with insights from research]\n\n"
-        "DO NOT include a 'Sources' or 'References' section in your response text, as they will be displayed separately."
+        "You are a professional AI research assistant. Provide a structured, concise response "
+        "derived from the provided blog content and web search findings. "
+        "Your response MUST strictly follow this format and headers:\n\n"
+        "### SUMMARY\n"
+        "• [Key point 1]\n"
+        "• [Key point 2]\n"
+        "• [Key point 3]\n\n"
+        "### KEY INSIGHT\n"
+        "[A single, short paragraph explaining the main takeaway in simple terms.]\n\n"
+        "### INTERNET SOURCES\n"
+        "[Title – URL]\n"
+        "[Title – URL]\n\n"
+        "RULES:\n"
+        "- Use numbered blog citations [n] inside the Summary and Key Insight sections.\n"
+        "- Keep the total length between 120 and 150 words.\n"
+        "- If no external sources are found, write 'No additional external sources retrieved.' under the INTERNET SOURCES header.\n"
+        "- Avoid long paragraphs; keep it crisp."
     )
 
-    user_content = f"Blog Post Content (Numbered Sections):\n{chunked_context_str}\n\n"
+    user_content = f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}\n\n"
     if search_context:
-        user_content += f"Additional Web Research:\n{search_context}\n\n"
+        user_content += f"--- WEB SEARCH FINDINGS ---\n{search_context}\n\n"
     
-    user_content += f"Question: {question}"
+    user_content += f"USER QUESTION: {question}"
 
     try:
         completion = client.chat.completions.create(
@@ -119,7 +127,7 @@ def answer_question(context, question):
                 {"role": "user", "content": user_content}
             ],
             temperature=0.7,
-            max_tokens=1024 # Increased token limit
+            max_tokens=1024
         )
         
         answer = completion.choices[0].message.content
@@ -131,7 +139,7 @@ def answer_question(context, question):
     except Exception as e:
         print(f"AI ERROR (LLM): {e}", flush=True)
         return {
-            "answer": "Failed to get an answer from AI. Please try again later.",
+            "answer": "### SUMMARY\n• Failed to generate answer.\n\n### KEY INSIGHT\nAn error occurred. Please try again.\n\n### INTERNET SOURCES\nNone.",
             "sources": []
         }
 

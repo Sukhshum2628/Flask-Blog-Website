@@ -50,24 +50,71 @@ def summarize_text(text):
         return "Failed to generate summary."
 
 def answer_question(context, question):
-    """Answers a question based on the provided context (blog content)."""
+    """Answers a question based on the provided context (blog content) and optional web research."""
     if not context or not question:
         return "I need both context and a question to provide an answer."
+
+    print(f"AI RESEARCH: Processing question '{question}'", flush=True)
+
+    search_context = ""
+    sources_list = []
+
+    # 1. Perform a quick Tavily search for additional context if needed
+    if TAVILY_API_KEY:
+        try:
+            tavily_url = "https://api.tavily.com/search"
+            # Limit search for efficiency in chat
+            payload = {
+                "api_key": TAVILY_API_KEY,
+                "query": f"{question} in context of {context[:100]}",
+                "search_depth": "basic",
+                "max_results": 3
+            }
+            response = requests.post(tavily_url, json=payload, timeout=5)
+            search_results = response.json().get("results", [])
+            
+            for result in search_results:
+                search_context += f"Web Snippet from {result['url']}: {result['content']}\n\n"
+                sources_list.append(f"1. [{result['title']}]({result['url']})")
+        except Exception as e:
+            print(f"AI ERROR (Tavily): {e}", flush=True)
+
+    # 2. Prepare the LLM prompt
+    system_prompt = (
+        "You are a helpful AI research assistant. Answer the user's question using the provided blog content "
+        "and any relevant web search results. Follow this structure strictly:\n\n"
+        "### Summary\n[Concise answer with bullet points for key facts]\n\n"
+        "### Additional Context\n[Short explanation with insights from research]\n\n"
+        "### Relevant Sources\n[List of source titles with links if available]"
+    )
+
+    user_content = f"Blog Post Content:\n{context}\n\n"
+    if search_context:
+        user_content += f"Additional Web Research:\n{search_context}\n\n"
+    
+    user_content += f"Question: {question}"
 
     try:
         completion = client.chat.completions.create(
             model=AI_MODEL,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant. Answer the user's question based ONLY on the provided blog content. If the answer is not in the content, say you don't know based on this article."},
-                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
             ],
             temperature=0.7,
-            max_tokens=500
+            max_tokens=1024 # Increased token limit
         )
-        return completion.choices[0].message.content
+        
+        answer = completion.choices[0].message.content
+        
+        # Append sources if LLM didn't include them properly
+        if search_context and "### Relevant Sources" not in answer:
+            answer += "\n\n### Relevant Sources\n" + "\n".join(sources_list)
+            
+        return answer
     except Exception as e:
-        print(f"Error in answer_question: {e}")
-        return "Failed to get an answer from AI."
+        print(f"AI ERROR (LLM): {e}", flush=True)
+        return "Failed to get an answer from AI. Please try again later."
 
 def research_topic(topic):
     """Uses Tavily to search the web and the LLM to summarize findings."""

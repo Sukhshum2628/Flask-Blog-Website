@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
 
 {% block head %}
+<!-- Marked.js for Markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
     .progress-container {
         position: fixed;
@@ -46,6 +48,19 @@
     }
     .ai-bubble:hover {
         transform: scale(1.1);
+    }
+    /* Markdown Styles in Chat */
+    .ai-message ul, .ai-message ol {
+        padding-left: 20px;
+        margin-bottom: 10px;
+    }
+    .ai-message p {
+        margin-bottom: 8px;
+    }
+    .ai-message code {
+        background: #f4f4f4;
+        padding: 2px 4px;
+        border-radius: 4px;
     }
 </style>
 {% endblock %}
@@ -455,7 +470,8 @@
             body.removeChild(typing);
             const aiMsg = document.createElement('div');
             aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small';
-            aiMsg.innerText = data.answer || "Sorry, I couldn't get an answer.";
+            // Render Markdown
+            aiMsg.innerHTML = marked.parse(data.answer || "Sorry, I couldn't get an answer.");
             body.appendChild(aiMsg);
             body.scrollTop = body.scrollHeight;
         } catch (e) {

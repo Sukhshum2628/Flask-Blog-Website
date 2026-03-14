@@ -54,6 +54,12 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
 app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
 
+from flask_compress import Compress
+from flask_caching import Cache
+
+compress = Compress(app)
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 60})
+
 import requests
 
 # ... (imports)
@@ -578,6 +584,7 @@ def new_post():
     return render_template('post_form.html', form=form, legend="Write a Story")
 
 @app.route('/post/<post_id>', methods=['GET', 'POST'])
+@cache.cached(timeout=60, unless=lambda: 'user' in session or request.method == 'POST')
 def view_post(post_id):
     post = posts.find_one({'_id': ObjectId(post_id)})
     if not post:

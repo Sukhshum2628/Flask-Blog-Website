@@ -139,6 +139,25 @@
             once: true,
             offset: 100
         });
+
+        // Click debounce for post links
+        document.addEventListener('click', function(e) {
+            const link = e.target.closest('a');
+            if (!link) return;
+
+            const href = link.getAttribute('href');
+            if (href && href.includes('/post/') && !href.includes('/new') && !href.includes('bookmark')) {
+                // Visually and functionally disable link
+                link.style.pointerEvents = 'none';
+                link.style.opacity = '0.5';
+
+                // Re-enable after 3 seconds in case navigation fails or user uses Back button
+                setTimeout(() => {
+                    link.style.pointerEvents = 'auto';
+                    link.style.opacity = '1';
+                }, 3000);
+            }
+        });
     </script>
     {% block scripts %}{% endblock %}
 </body>

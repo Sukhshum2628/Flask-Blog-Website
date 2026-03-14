@@ -62,6 +62,28 @@
         padding: 2px 4px;
         border-radius: 4px;
     }
+    /* Citation Highlight */
+    .ai-highlight {
+        background-color: #fff3cd;
+        transition: background-color 0.5s ease;
+        border-radius: 4px;
+        padding: 2px;
+    }
+    .ai-highlight-active {
+        background-color: #ffe066;
+        box-shadow: 0 0 10px rgba(255, 224, 102, 0.5);
+    }
+    .ai-citation {
+        cursor: pointer;
+        color: #0d6efd;
+        font-weight: bold;
+        text-decoration: none;
+        padding: 0 2px;
+        border-radius: 3px;
+    }
+    .ai-citation:hover {
+        background-color: #e9ecef;
+    }
 </style>
 {% endblock %}
 
@@ -470,14 +492,53 @@
             body.removeChild(typing);
             const aiMsg = document.createElement('div');
             aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small';
+            
             // Render Markdown
-            aiMsg.innerHTML = marked.parse(data.answer || "Sorry, I couldn't get an answer.");
+            let answer = data.answer || "Sorry, I couldn't get an answer.";
+            
+            // Transform [n] citations into clickable buttons
+            answer = answer.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
+            
+            aiMsg.innerHTML = marked.parse(answer);
             body.appendChild(aiMsg);
             body.scrollTop = body.scrollHeight;
         } catch (e) {
             body.removeChild(typing);
-            console.error(e);
+            console.error("AI Error:", e);
         }
     }
+
+    // Grounded Citations Logic
+    document.addEventListener('DOMContentLoaded', () => {
+        const postContent = document.querySelector('.post-content');
+        if (postContent) {
+            // Index paragraphs for citations
+            const paragraphs = postContent.querySelectorAll('p');
+            paragraphs.forEach((p, index) => {
+                p.id = `section-${index + 1}`;
+                p.classList.add('ai-highlight');
+            });
+        }
+    });
+
+    function scrollToSection(num) {
+        const section = document.getElementById(`section-${num}`);
+        if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            section.classList.add('ai-highlight-active');
+            setTimeout(() => {
+                section.classList.remove('ai-highlight-active');
+            }, 3000);
+        }
+    }
+
+    // Handle citation clicks in the chat widget
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('ai-citation')) {
+            const num = e.target.getAttribute('data-num');
+            scrollToSection(num);
+        }
+    });
 </script>
 {% endblock %}
+```

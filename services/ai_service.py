@@ -49,12 +49,25 @@ def summarize_text(text):
         print(f"Error in summarize_text: {e}")
         return "Failed to generate summary."
 
+def chunk_text(text):
+    """Splits text into paragraphs and returns a numbered list of chunks."""
+    # Split by newlines (paragraphs)
+    paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+    chunked = []
+    for i, p in enumerate(paragraphs, 1):
+        chunked.append(f"[{i}] {p}")
+    return chunked
+
 def answer_question(context, question):
-    """Answers a question based on the provided context (blog content) and optional web research."""
+    """Answers a question with grounded citations from the blog content."""
     if not context or not question:
         return "I need both context and a question to provide an answer."
 
     print(f"AI RESEARCH: Processing question '{question}'", flush=True)
+
+    # 1. Chunk the blog context for grounded citations
+    context_chunks = chunk_text(context)
+    chunked_context_str = "\n".join(context_chunks)
 
     search_context = ""
     sources_list = []
@@ -82,13 +95,17 @@ def answer_question(context, question):
     # 2. Prepare the LLM prompt
     system_prompt = (
         "You are a helpful AI research assistant. Answer the user's question using the provided blog content "
-        "and any relevant web search results. Follow this structure strictly:\n\n"
-        "### Summary\n[Concise answer with bullet points for key facts]\n\n"
+        "(which is divided into numbered sections) and any relevant web search results. "
+        "Strictly follow these rules:\n"
+        "1. GROUNDING: Use the numbered sections from the blog post [1], [2], etc., to support your answer. "
+        "Include the bracketed number immediately after the sentence it supports.\n"
+        "2. STRUCTURE: Use the following headers:\n"
+        "### Summary\n[Concise answer with bullet points and citations]\n\n"
         "### Additional Context\n[Short explanation with insights from research]\n\n"
         "### Relevant Sources\n[List of source titles with links if available]"
     )
 
-    user_content = f"Blog Post Content:\n{context}\n\n"
+    user_content = f"Blog Post Content (Numbered Sections):\n{chunked_context_str}\n\n"
     if search_context:
         user_content += f"Additional Web Research:\n{search_context}\n\n"
     

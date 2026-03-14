@@ -16,6 +16,7 @@ import threading
 from itsdangerous import URLSafeTimedSerializer as Serializer
 
 # ... (rest of imports)
+from services import ai_service
 
 def send_digest_email(user_email, username, last_visit):
     with app.app_context():
@@ -682,7 +683,11 @@ def view_post(post_id):
             'created_at': {'$gt': post['created_at']}
         }, sort=[('created_at', 1)])
 
-    return render_template('post_detail.html', post=post, author=author, comments=post_comments, form=form, read_time=read_time, is_author=is_author, user_reaction=user_reaction, reaction_counts=reaction_counts, is_bookmarked=is_bookmarked, active_readers=active_readers, series_prev=series_prev, series_next=series_next, server_progress=server_progress)
+    # Related Posts
+    all_other_posts = list(posts.find({'is_draft': {'$ne': True}, '_id': {'$ne': ObjectId(post_id)}}).limit(50))
+    related_posts = ai_service.get_related_posts(post, all_other_posts)
+
+    return render_template('post_detail.html', post=post, author=author, comments=post_comments, form=form, read_time=read_time, is_author=is_author, user_reaction=user_reaction, reaction_counts=reaction_counts, is_bookmarked=is_bookmarked, active_readers=active_readers, series_prev=series_prev, series_next=series_next, server_progress=server_progress, related_posts=related_posts)
 
 @app.route('/post/<post_id>/bookmark')
 def bookmark_post(post_id):
@@ -700,6 +705,50 @@ def bookmark_post(post_id):
         flash('Added to reading list.', 'success')
         
     return redirect(url_for('view_post', post_id=post_id))
+
+# AI Routes
+@app.route('/ai/summarize/<post_id>', methods=['POST'])
+def ai_summarize(post_id):
+    if 'user' not in session:
+        return {'error': 'Unauthorized'}, 401
+    
+    post = posts.find_one({'_id': ObjectId(post_id)})
+    if not post:
+        return {'error': 'Post not found'}, 404
+        
+    summary = ai_service.summarize_text(post.get('content', ''))
+    return {'summary': summary}
+
+@app.route('/ai/ask/<post_id>', methods=['POST'])
+def ai_ask(post_id):
+    if 'user' not in session:
+        return {'error': 'Unauthorized'}, 401
+    
+    data = request.get_json()
+    question = data.get('question')
+    if not question:
+        return {'error': 'Question is required'}, 400
+        
+    post = posts.find_one({'_id': ObjectId(post_id)})
+    if not post:
+        return {'error': 'Post not found'}, 404
+        
+    clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+    answer = ai_service.answer_question(clean_text, question)
+    return {'answer': answer}
+
+@app.route('/ai/research', methods=['POST'])
+def ai_research():
+    if 'user' not in session:
+        return {'error': 'Unauthorized'}, 401
+        
+    data = request.get_json()
+    topic = data.get('topic')
+    if not topic:
+        return {'error': 'Topic is required'}, 400
+        
+    result = ai_service.research_topic(topic)
+    return result
 
 @app.route('/post/<post_id>/edit', methods=['GET', 'POST'])
 def edit_post(post_id):

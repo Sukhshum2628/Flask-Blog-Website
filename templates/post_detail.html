@@ -16,6 +16,37 @@
         width: 0%;
         transition: width 0.1s;
     }
+    .ai-chat-widget {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1050;
+    }
+    .ai-chat-card {
+        width: 350px;
+        border-radius: 15px;
+        overflow: hidden;
+        display: none;
+        backdrop-filter: blur(10px);
+        background: rgba(255, 255, 255, 0.9);
+    }
+    .ai-bubble {
+        cursor: pointer;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: #198754;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        transition: transform 0.3s;
+    }
+    .ai-bubble:hover {
+        transform: scale(1.1);
+    }
 </style>
 {% endblock %}
 
@@ -47,10 +78,18 @@
             {% endif %}
             
             {% if post.summary %}
-                <div class="p-3 bg-light border-start border-4 border-dark mb-4 fst-italic text-muted">
+                <div class="p-3 bg-light border-start border-4 border-dark mb-4 fst-italic text-muted position-relative">
                     <strong>TL;DR:</strong> {{ post.summary }}
                 </div>
             {% endif %}
+
+            <div id="aiSummaryArea" class="p-3 bg-success-subtle border-start border-4 border-success mb-4 d-none" style="border-radius: 0 10px 10px 0;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-bold text-success"><i class="bi bi-robot"></i> AI Summary</span>
+                    <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('aiSummaryArea').classList.add('d-none')"></button>
+                </div>
+                <div id="aiSummaryContent" class="small text-dark"></div>
+            </div>
 
             <div class="d-flex align-items-center mb-4">
                 <img src="{{ author.avatar_url or 'https://ui-avatars.com/api/?name=' + post.author }}" 
@@ -127,8 +166,36 @@
             <a href="{{ url_for('bookmark_post', post_id=post._id) }}" class="btn {{ 'btn-dark' if is_bookmarked else 'btn-outline-secondary' }} rounded-pill" title="{{ 'Remove from Reading List' if is_bookmarked else 'Save to Reading List' }}">
                 <i class="bi {{ 'bi-bookmark-fill' if is_bookmarked else 'bi-bookmark' }}"></i>
             </a>
+            
+            <button class="btn btn-success rounded-pill ms-2" id="summarizeBtn">
+                <i class="bi bi-robot"></i> AI Summarize
+            </button>
             <!-- Share buttons could go here -->
         </div>
+
+        <!-- Related Articles -->
+        {% if related_posts %}
+        <div class="related-articles mb-5">
+            <h5 class="fw-bold mb-4">Related Stories</h5>
+            <div class="row g-4">
+                {% for related in related_posts %}
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm hover-up">
+                        {% if related.cover_url %}
+                        <img src="{{ related.cover_url }}" class="card-img-top" alt="{{ related.title }}" style="height: 120px; object-fit: cover;">
+                        {% endif %}
+                        <div class="card-body p-3">
+                            <h6 class="card-title fw-bold">
+                                <a href="{{ url_for('view_post', post_id=related._id) }}" class="text-decoration-none text-dark">{{ related.title }}</a>
+                            </h6>
+                            <p class="card-text small text-muted">{{ related.author }} · {{ related.created_at.strftime('%b %d') }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Series Navigation -->
         {% if post.series_name %}
@@ -211,6 +278,31 @@
         </section>
     </div>
 </div>
+
+<!-- Ask AI Widget -->
+<div class="ai-chat-widget">
+    <div class="ai-chat-card card shadow-lg mb-3" id="aiChatCard">
+        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center py-3">
+            <span class="fw-bold"><i class="bi bi-robot"></i> Ask AI about this article</span>
+            <button type="button" class="btn-close btn-close-white" onclick="toggleAIChat()"></button>
+        </div>
+        <div class="card-body overflow-auto p-3" id="aiChatBody" style="height: 300px;">
+            <div class="ai-message bg-light p-2 rounded mb-2 small">
+                Hi! I've read this article. Ask me anything about it!
+            </div>
+        </div>
+        <div class="card-footer bg-white p-2">
+            <div class="input-group">
+                <input type="text" id="aiQuestionInput" class="form-control form-control-sm border-0 bg-light" placeholder="Type a question...">
+                <button class="btn btn-success btn-sm rounded" id="sendQuestionBtn"><i class="bi bi-send"></i></button>
+            </div>
+        </div>
+    </div>
+    <div class="ai-bubble" onclick="toggleAIChat()">
+        <i class="bi bi-robot"></i>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -287,5 +379,89 @@
             toast.show();
         }
     });
+
+    // AI Summarize
+    document.getElementById('summarizeBtn').addEventListener('click', async function() {
+        const btn = this;
+        const area = document.getElementById('aiSummaryArea');
+        const content = document.getElementById('aiSummaryContent');
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Summarizing...';
+        
+        try {
+            const response = await fetch(`/ai/summarize/${postId}`, { method: 'POST' });
+            const data = await response.json();
+            
+            if (data.summary) {
+                content.innerText = data.summary;
+                area.classList.remove('d-none');
+                area.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-robot"></i> AI Summarize';
+        }
+    });
+
+    // AI Chat Toggle
+    function toggleAIChat() {
+        const card = document.getElementById('aiChatCard');
+        if (card.style.display === 'block') {
+            card.style.display = 'none';
+        } else {
+            card.style.display = 'block';
+        }
+    }
+
+    // AI Question
+    document.getElementById('sendQuestionBtn').addEventListener('click', sendQuestion);
+    document.getElementById('aiQuestionInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendQuestion();
+    });
+
+    async function sendQuestion() {
+        const input = document.getElementById('aiQuestionInput');
+        const body = document.getElementById('aiChatBody');
+        const question = input.value.trim();
+        
+        if (!question) return;
+        
+        // Add user message
+        const userMsg = document.createElement('div');
+        userMsg.className = 'user-message bg-success-subtle p-2 rounded mb-2 small text-end ms-auto';
+        userMsg.style.maxWidth = '80%';
+        userMsg.innerText = question;
+        body.appendChild(userMsg);
+        input.value = '';
+        body.scrollTop = body.scrollHeight;
+        
+        // Add typing indicator
+        const typing = document.createElement('div');
+        typing.className = 'ai-message bg-light p-2 rounded mb-2 small';
+        typing.innerHTML = '<span class="spinner-grow spinner-grow-sm"></span> Thinking...';
+        body.appendChild(typing);
+        
+        try {
+            const response = await fetch(`/ai/ask/${postId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question })
+            });
+            const data = await response.json();
+            
+            body.removeChild(typing);
+            const aiMsg = document.createElement('div');
+            aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small';
+            aiMsg.innerText = data.answer || "Sorry, I couldn't get an answer.";
+            body.appendChild(aiMsg);
+            body.scrollTop = body.scrollHeight;
+        } catch (e) {
+            body.removeChild(typing);
+            console.error(e);
+        }
+    }
 </script>
 {% endblock %}

@@ -46,15 +46,15 @@ def summarize_text(text):
     max_chunk_id = len(context_chunks)
 
     system_prompt = (
-        "You are a professional AI research assistant. Provide a structured, concise summary "
-        "of the provided blog content.\n"
-        "Your response MUST strictly follow this exact format and headers:\n\n"
+        "You are a helpful AI research assistant. Provide a concise summary of the provided blog content.\n"
+        "Please try to follow this format if possible:\n\n"
         "### SUMMARY\n"
         "• [Key point 1]\n"
         "• [Key point 2]\n\n"
         "### KEY INSIGHT\n"
         "[A short explanation of the main idea]\n\n"
         "RULES:\n"
+        "- Always generate a meaningful answer. Do not return 'No response generated'.\n"
         "- Do NOT include citation numbers (e.g. no [1], [2]). The system will handle citations.\n"
         "- Do NOT generate a SOURCES section."
     )
@@ -122,12 +122,18 @@ def summarize_text(text):
             "citation_mapping": {}
         }
 
-def _parse_llm_response(text):
-    """Safely extracts summary points and insight from raw LLM text without crashing."""
+def _parse_llm_response(text, fallback_context=None):
+    """Safely extracts summary points and insight from raw LLM text with contextual fallback."""
     summary_points = []
     insight = ""
     
-    if not text:
+    # Check for empty completion or specific LLM refusal
+    is_failed_response = not text or "No response generated" in text or len(text.strip()) < 10
+    
+    if is_failed_response:
+        if fallback_context:
+            fallback_text = fallback_context[:250].strip() + ("..." if len(fallback_context) > 250 else "")
+            return [f"Summary generated from context: {fallback_text}"], "The AI model could not process this request structure, but here is the blog's introductory context."
         return ["No response generated."], "The model returned an empty response."
         
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -258,7 +264,7 @@ def answer_question(context, question):
                 "search_depth": "basic",
                 "max_results": 3
             }
-            response = requests.post(tavily_url, json=payload, timeout=5)
+            response = requests.post(tavily_url, json=payload, timeout=10)
             search_results = response.json().get("results", [])
             for result in search_results:
                 sources_list.append({"title": result['title'], "url": result['url']})
@@ -269,15 +275,16 @@ def answer_question(context, question):
 
     # 2. Prepare the LLM prompt
     system_prompt = (
-        "You are a professional AI research assistant. Provide a structured, concise response "
+        "You are a helpful AI research assistant. Provide a concise response "
         "derived ONLY from the provided blog content.\n"
-        "Your response MUST strictly follow this exact format and headers:\n\n"
+        "Please try to follow this format if possible:\n\n"
         "### SUMMARY\n"
         "• [Key point 1]\n"
         "• [Key point 2]\n\n"
         "### KEY INSIGHT\n"
         "[A short explanation of the main takeaway in simple terms.]\n\n"
         "RULES:\n"
+        "- Always generate a meaningful answer. Do not return 'No response generated'.\n"
         "- Do NOT include citation numbers (e.g. no [1], [2]). The system will handle citations.\n"
         "- Keep the total length between 120 and 150 words.\n"
         "- Avoid long paragraphs; keep it crisp.\n"
@@ -307,7 +314,7 @@ def answer_question(context, question):
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        parsed_summary, parsed_insight = _parse_llm_response(raw_answer)
+        parsed_summary, parsed_insight = _parse_llm_response(raw_answer, fallback_context=context)
         
         # Deduplicate internet sources based on URL
         unique_net_sources = []
@@ -373,7 +380,7 @@ def research_topic(topic):
             "search_depth": "basic",
             "max_results": 5
         }
-        response = requests.post(tavily_url, json=payload)
+        response = requests.post(tavily_url, json=payload, timeout=10)
         search_results = response.json().get("results", [])
 
         if not search_results:

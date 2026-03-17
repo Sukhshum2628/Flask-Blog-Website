@@ -84,7 +84,10 @@ def summarize_text(text):
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        parsed_summary, parsed_insight = _parse_llm_response(raw_answer)
+        # Map sentences to citations safely (using the full raw_answer to get all points)
+        raw_answer_cited, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
+        
+        parsed_summary, parsed_insight = _parse_llm_response(raw_answer_cited)
         
         if not context_chunks:
             return {
@@ -94,9 +97,6 @@ def summarize_text(text):
                 "internet_sources": [],
                 "citation_mapping": {}
             }
-
-        # Map sentences to citations safely (using the full raw_answer to get all points)
-        _, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
         
         # Build Sources Array
         sources_data = []
@@ -162,12 +162,21 @@ def _parse_llm_response(text, fallback_context=None):
     # If the LLM completely ignored formatting, use the raw text as the summary
     if not summary_points and not insight:
         summary_points = [text.strip()]
-        insight_preview = text.strip()[:100] + ("..." if len(text.strip()) > 100 else "")
-        insight = f"Insight derived from raw summary: {insight_preview}"
+        insight = "Insight derived from raw summary: " + (text.strip()[:100] + "...")
     elif not summary_points:
         summary_points = [text.strip()]
     elif not insight:
-        insight = "No specific insight provided."
+        if summary_points:
+            insight = f"Key takeaway: {summary_points[-1]}"
+        else:
+            insight = "Focus on the facts presented in the context."
+            
+    # Artificially construct bullets if the summary is just one long paragraph
+    if len(summary_points) == 1 and len(summary_points[0]) > 100:
+        sentences = re.split(r'(?<=[.!?])\s+', summary_points[0])
+        bullets = [s.strip() for s in sentences if len(s.strip()) > 10]
+        if len(bullets) >= 2:
+            summary_points = bullets
         
     return summary_points, insight.strip()
 
@@ -272,7 +281,8 @@ def answer_question(context, question):
             response = requests.post(tavily_url, json=payload, timeout=10)
             search_results = response.json().get("results", [])
             for result in search_results:
-                sources_list.append({"title": result['title'], "url": result['url']})
+                if result.get("url"):
+                    sources_list.append({"title": result.get("title", "Source"), "url": result["url"]})
         except Exception as e:
             print(f"AI ERROR (Tavily): {e}", flush=True)
 
@@ -321,7 +331,10 @@ def answer_question(context, question):
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        parsed_summary, parsed_insight = _parse_llm_response(raw_answer, fallback_context=context)
+        # Map sentences to citations safely
+        raw_answer_cited, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
+
+        parsed_summary, parsed_insight = _parse_llm_response(raw_answer_cited, fallback_context=context)
         
         # Deduplicate internet sources based on URL
         unique_net_sources = []
@@ -339,9 +352,6 @@ def answer_question(context, question):
                 "internet_sources": unique_net_sources,
                 "citation_mapping": {}
             }
-            
-        # Map sentences to citations safely
-        _, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
         
         sources_data = []
         for display_num in display_citations:

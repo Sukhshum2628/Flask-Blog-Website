@@ -2,7 +2,7 @@ import os
 import math
 import re
 from datetime import datetime, timezone, timedelta
-from flask import Flask, render_template, request, redirect, session, url_for, flash, abort
+from flask import Flask, render_template, request, redirect, session, url_for, flash, abort, jsonify
 from flask_pymongo import PyMongo
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, TextAreaField, SubmitField, SelectField
@@ -717,7 +717,6 @@ def bookmark_post(post_id):
 @app.route('/ai/summarize/<post_id>', methods=['POST'])
 def ai_summarize(post_id):
     try:
-        from flask import jsonify
         post = posts.find_one({'_id': ObjectId(post_id)})
         if not post:
             return jsonify({'error': 'Post not found'}), 404
@@ -736,7 +735,6 @@ def ai_summarize(post_id):
             
     except Exception as e:
         print(f"AI SUMMARIZE ERROR: {e}", flush=True)
-        from flask import jsonify
         return jsonify({"summary": "An error occurred while linking to the AI. Please try again later.", "citations": []}), 500
 
 @app.route('/ai/ask/<post_id>', methods=['POST'])
@@ -766,7 +764,6 @@ def ai_ask(post_id):
             
     except Exception as e:
         print(f"AI ASK ERROR: {e}", flush=True)
-        from flask import jsonify
         return jsonify({'error': str(e), 'answer': 'An error occurred.', 'sources': []}), 500
 
 @app.route('/ai/research', methods=['POST'])

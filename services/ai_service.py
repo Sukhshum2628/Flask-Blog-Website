@@ -30,26 +30,23 @@ def summarize_text(text):
     if not text:
         return {"summary": "No content to summarize.", "citations": []}
     
-    # 1. Chunk the blog context for grounded citations
+    # 1. Chunk the blog context for grounded citations (plain text, NO numbers)
     context_chunks = chunk_text(text)
     chunked_context_str = "\n".join(context_chunks)
     max_chunk_id = len(context_chunks)
 
     system_prompt = (
-        "You are a professional AI research assistant. Provide a structured, concise response "
-        "derived from the provided blog content.\n"
+        "You are a professional AI research assistant. Provide a structured, concise summary "
+        "of the provided blog content.\n"
         "Your response MUST strictly follow this exact format and headers:\n\n"
         "### SUMMARY\n"
-        "• [Key point 1 with citation [1]]\n"
-        "• [Key point 2 with citation [2]]\n\n"
+        "• [Key point 1]\n"
+        "• [Key point 2]\n\n"
         "### KEY INSIGHT\n"
         "[A short explanation of the main idea]\n\n"
         "RULES:\n"
-        "- ONLY use the exact provided section numbers (e.g., [1], [2]).\n"
-        "- Do NOT invent or guess citations.\n"
-        "- Do NOT generate citation ranges (e.g., avoid [4-10]). Cite each individually like [4] [5].\n"
-        "- Only cite sections that match the provided text.\n"
-        "- Do NOT generate a SOURCES section. The system will append it."
+        "- Do NOT include citation numbers (e.g. no [1], [2]). The system will handle citations.\n"
+        "- Do NOT generate a SOURCES section."
     )
 
     try:
@@ -65,24 +62,11 @@ def summarize_text(text):
         
         raw_answer = completion.choices[0].message.content
         
-        # Backend Validation: Prevent citation ranges and clean invalid ones
-        answer = re.sub(r'\[(\d+)\s*-\s*\d+\]', r'[\1]', raw_answer)  # convert [4-14] to [4]
+        # Strip any rogue citations if the LLM hallucinated them despite the prompt
+        raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        def replace_invalid_citation(match):
-            num = int(match.group(1))
-            if 0 < num <= max_chunk_id:
-                return f"[{num}]"
-            return str(num) # remove brackets so frontend ignores it
-            
-        answer = re.sub(r'\[(\d+)\]', replace_invalid_citation, answer)
-        
-        # Extract validated citations
-        citations = []
-        matches = re.findall(r'\[(\d+)\]', answer)
-        for m in matches:
-            num = int(m)
-            if num not in citations:
-                citations.append(num)
+        # Map sentences to citations
+        answer, citations = _map_citations_to_text(raw_answer, context_chunks)
                 
         # Build Sources Output Manually
         answer = answer.split("### SOURCES")[0].split("### INTERNET SOURCES")[0].strip() # Just in case it hallucinated them
@@ -91,8 +75,7 @@ def summarize_text(text):
             answer += "No specific blog sections were cited.\n"
         else:
             for num in sorted(citations):
-                text_snippet = context_chunks[num-1].split('] ', 1)[-1]
-                excerpt = text_snippet[:100].strip() + ("..." if len(text_snippet) > 100 else "")
+                excerpt = context_chunks[num-1][:100].strip() + ("..." if len(context_chunks[num-1]) > 100 else "")
                 answer += f"[{num}] {excerpt}\n"
                 
         answer += "\n### INTERNET SOURCES\nNo external sources used."
@@ -106,13 +89,50 @@ def summarize_text(text):
         return {"summary": "Failed to generate summary.", "citations": []}
 
 def chunk_text(text):
-    """Splits text into paragraphs and returns a numbered list of chunks."""
+    """Splits text into paragraphs and returns a list of chunks."""
     # Split by newlines (paragraphs)
     paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
-    chunked = []
-    for i, p in enumerate(paragraphs, 1):
-        chunked.append(f"[{i}] {p}")
-    return chunked
+    return paragraphs
+
+def _get_jaccard_similarity(str1, str2):
+    """Calculates word overlap similarity between two strings."""
+    a = set(re.findall(r'\w+', str1.lower()))
+    b = set(re.findall(r'\w+', str2.lower()))
+    if not a or not b:
+        return 0.0
+    intersection = a.intersection(b)
+    union = a.union(b)
+    return len(intersection) / len(union)
+
+def _map_citations_to_text(llm_response, chunks):
+    """Maps LLM sentences back to original chunks to append reliable exact citations."""
+    lines = llm_response.split('\n')
+    mapped_lines = []
+    all_cited_ids = set()
+
+    # We map list items or Insight sentences
+    for line in lines:
+        if line.startswith('•') or (len(line.strip()) > 20 and not line.startswith('###')):
+            best_match_idx = -1
+            best_score = 0
+            # Test this sentence against all original chunks
+            for i, chunk in enumerate(chunks):
+                score = _get_jaccard_similarity(line, chunk)
+                if score > best_score:
+                    best_score = score
+                    best_match_idx = i
+            
+            # If there's a reasonable overlap, cite it
+            if best_score > 0.1 and best_match_idx != -1:
+                chunk_num = best_match_idx + 1 # 1-indexed
+                all_cited_ids.add(chunk_num)
+                # Avoid double-citing if it's already at the end of the line somehow
+                if not line.endswith(f"[{chunk_num}]"):
+                    line = f"{line.strip()} [{chunk_num}]"
+        
+        mapped_lines.append(line)
+
+    return "\n".join(mapped_lines), list(all_cited_ids)
 
 def answer_question(context, question):
     """Answers a question with grounded citations from the blog content."""
@@ -136,15 +156,13 @@ def answer_question(context, question):
             # Limit search for efficiency in chat
             payload = {
                 "api_key": TAVILY_API_KEY,
-                "query": f"{question} in context of {context[:100]}",
+                "query": f"{question} based on {context[:100]}",
                 "search_depth": "basic",
                 "max_results": 3
             }
             response = requests.post(tavily_url, json=payload, timeout=5)
             search_results = response.json().get("results", [])
-            
             for result in search_results:
-                search_context += f"Web Snippet from {result['url']}: {result['content']}\n\n"
                 sources_list.append({"title": result['title'], "url": result['url']})
         except Exception as e:
             print(f"AI ERROR (Tavily): {e}", flush=True)
@@ -154,26 +172,21 @@ def answer_question(context, question):
     # 2. Prepare the LLM prompt
     system_prompt = (
         "You are a professional AI research assistant. Provide a structured, concise response "
-        "derived from the provided blog content and web search findings.\n"
+        "derived ONLY from the provided blog content.\n"
         "Your response MUST strictly follow this exact format and headers:\n\n"
         "### SUMMARY\n"
-        "• [Key point 1 with citation [1]]\n"
-        "• [Key point 2 with citation [2]]\n\n"
+        "• [Key point 1]\n"
+        "• [Key point 2]\n\n"
         "### KEY INSIGHT\n"
         "[A short explanation of the main takeaway in simple terms.]\n\n"
         "RULES:\n"
-        "- ONLY use the exact provided numbered blog citations (e.g., [1], [2]).\n"
-        "- Do NOT invent or guess citations.\n"
-        "- Do NOT generate citation ranges (e.g., avoid [4-10]). Cite each individually like [4] [5].\n"
+        "- Do NOT include citation numbers (e.g. no [1], [2]). The system will handle citations.\n"
         "- Keep the total length between 120 and 150 words.\n"
         "- Avoid long paragraphs; keep it crisp.\n"
         "- Do NOT generate a SOURCES section. The system will append it."
     )
 
     user_content = f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}\n\n"
-    if search_context:
-        user_content += f"--- WEB SEARCH FINDINGS ---\n{search_context}\n\n"
-    
     user_content += f"USER QUESTION: {question}"
 
     try:
@@ -189,24 +202,11 @@ def answer_question(context, question):
         
         raw_answer = completion.choices[0].message.content
         
-        # Backend Validation: Prevent citation ranges and clean invalid ones
-        answer = re.sub(r'\[(\d+)\s*-\s*\d+\]', r'[\1]', raw_answer)
+        # Strip any rogue citations if the LLM hallucinated them despite the prompt
+        raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        def replace_invalid_citation(match):
-            num = int(match.group(1))
-            if 0 < num <= max_chunk_id:
-                return f"[{num}]"
-            return str(num)
-            
-        answer = re.sub(r'\[(\d+)\]', replace_invalid_citation, answer)
-        
-        # Extract validated citations
-        citations = []
-        matches = re.findall(r'\[(\d+)\]', answer)
-        for m in matches:
-            num = int(m)
-            if num not in citations:
-                citations.append(num)
+        # Map sentences to citations
+        answer, citations = _map_citations_to_text(raw_answer, context_chunks)
                 
         # Build Sources Output Manually
         answer = answer.split("### SOURCES")[0].split("### INTERNET SOURCES")[0].strip() # Just in case it hallucinated them
@@ -215,8 +215,7 @@ def answer_question(context, question):
             answer += "No specific blog sections were cited.\n"
         else:
             for num in sorted(citations):
-                text_snippet = context_chunks[num-1].split('] ', 1)[-1]
-                excerpt = text_snippet[:100].strip() + ("..." if len(text_snippet) > 100 else "")
+                excerpt = context_chunks[num-1][:100].strip() + ("..." if len(context_chunks[num-1]) > 100 else "")
                 answer += f"[{num}] {excerpt}\n"
                 
         answer += "\n### INTERNET SOURCES\n"

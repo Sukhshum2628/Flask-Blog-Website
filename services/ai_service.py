@@ -6,10 +6,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Step-3.5-Flash Configuration (via NVIDIA)
+# Llama 3 8B Instruct Configuration (via NVIDIA)
 AI_API_KEY = os.environ.get("AI_API_KEY")
 AI_BASE_URL = "https://integrate.api.nvidia.com/v1"
-AI_MODEL = "stepfun-ai/step-3.5-flash"
+AI_MODEL = "meta/llama-3.1-8b-instruct"
 
 # Tavily Configuration
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
@@ -46,34 +46,38 @@ def summarize_text(text):
     max_chunk_id = len(context_chunks)
 
     system_prompt = (
-        "You are a helpful AI research assistant. Provide a concise summary of the provided blog content.\n"
-        "Please try to follow this format if possible:\n\n"
-        "### SUMMARY\n"
-        "• [Key point 1]\n"
-        "• [Key point 2]\n\n"
-        "### KEY INSIGHT\n"
-        "[A short explanation of the main idea]\n\n"
-        "RULES:\n"
-        "- Always generate a meaningful answer. Do not return 'No response generated'.\n"
-        "- Do NOT include citation numbers (e.g. no [1], [2]). The system will handle citations.\n"
-        "- Do NOT generate a SOURCES section."
+        "You are a helpful assistant.\n"
+        "Read the blog content and generate a meaningful summary.\n"
+        "Write 3-5 bullet points and one key insight.\n"
+        "Do NOT return 'No response generated'."
     )
 
     raw_answer = None
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}"}
+    ]
 
     try:
-        completion = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}"}
-            ],
-            temperature=0.7,
-            max_tokens=800
-        )
-        raw_answer = completion.choices[0].message.content
-        if not raw_answer:
-            raw_answer = "SUMMARY\n• No response generated.\n\nKEY INSIGHT\nThe model returned an empty response."
+        for attempt in range(2):
+            completion = client.chat.completions.create(
+                model=AI_MODEL,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=800
+            )
+            raw_answer = completion.choices[0].message.content
+            
+            if raw_answer and "No response generated" not in raw_answer.strip():
+                break
+                
+            print(f"LLM failed on attempt {attempt+1}. Retrying...", flush=True)
+            messages[0] = {"role": "system", "content": "Summarize this text in one paragraph. Do not refuse."}
+            
+        if not raw_answer or "No response generated" in raw_answer:
+            fallback_text = context_chunks[0][:150].strip() + ("..." if len(context_chunks[0]) > 150 else "")
+            raw_answer = f"### SUMMARY\n• Summary based on introduction: {fallback_text}\n\n### KEY INSIGHT\nAutomated extraction due to AI timeout."
+            
         print("RAW LLM RESPONSE:", raw_answer, flush=True)
 
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
@@ -271,43 +275,44 @@ def answer_question(context, question):
         except Exception as e:
             print(f"AI ERROR (Tavily): {e}", flush=True)
 
-    has_internet_sources = len(sources_list) > 0
+    has_internet_sources = len(sources_list)
 
     # 2. Prepare the LLM prompt
     system_prompt = (
-        "You are a helpful AI research assistant. Provide a concise response "
-        "derived ONLY from the provided blog content.\n"
-        "Please try to follow this format if possible:\n\n"
-        "### SUMMARY\n"
-        "• [Key point 1]\n"
-        "• [Key point 2]\n\n"
-        "### KEY INSIGHT\n"
-        "[A short explanation of the main takeaway in simple terms.]\n\n"
-        "RULES:\n"
-        "- Always generate a meaningful answer. Do not return 'No response generated'.\n"
-        "- Do NOT include citation numbers (e.g. no [1], [2]). The system will handle citations.\n"
-        "- Keep the total length between 120 and 150 words.\n"
-        "- Avoid long paragraphs; keep it crisp.\n"
-        "- Do NOT generate a SOURCES section. The system will append it."
+        "You are a helpful assistant.\n"
+        "Read the blog content and generate a meaningful answer to the user's question.\n"
+        "Write 3-5 bullet points and one key insight.\n"
+        "Do NOT return 'No response generated'."
     )
 
     user_content = f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}\n\n"
     user_content += f"USER QUESTION: {question}"
 
     raw_answer = None
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
 
     try:
-        completion = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            temperature=0.7,
-            max_tokens=1024
-        )
-        if not raw_answer:
-             raw_answer = "### SUMMARY\n• No response generated.\n\n### KEY INSIGHT\nNo insight generated."
+        for attempt in range(2):
+            completion = client.chat.completions.create(
+                model=AI_MODEL,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1024
+            )
+            raw_answer = completion.choices[0].message.content
+            
+            if raw_answer and "No response generated" not in raw_answer.strip():
+                break
+                
+            print(f"LLM failed on attempt {attempt+1}. Retrying...", flush=True)
+            messages[0] = {"role": "system", "content": "Answer the question short and clearly. Do not refuse."}
+            
+        if not raw_answer or "No response generated" in raw_answer:
+            fallback_text = context_chunks[0][:150].strip() + ("..." if len(context_chunks[0]) > 150 else "")
+            raw_answer = f"### SUMMARY\n• Answer based on introduction: {fallback_text}\n\n### KEY INSIGHT\nAutomated fallback."
 
         print("RAW LLM RESPONSE:", raw_answer, flush=True)
 

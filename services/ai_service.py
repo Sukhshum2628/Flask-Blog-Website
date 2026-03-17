@@ -48,7 +48,8 @@ def summarize_text(text):
     system_prompt = (
         "You are a helpful assistant.\n"
         "Read the blog content and generate a meaningful summary.\n"
-        "Write 3-5 bullet points and one key insight.\n"
+        "Format your answer with exactly 3-5 concise bullet points. Avoid long paragraphs.\n"
+        "Provide one KEY INSIGHT (1-2 sentences max) that interprets the broader meaning, rather than simply repeating the summary.\n"
         "Do NOT return 'No response generated'."
     )
 
@@ -281,7 +282,8 @@ def answer_question(context, question):
     system_prompt = (
         "You are a helpful assistant.\n"
         "Read the blog content and generate a meaningful answer to the user's question.\n"
-        "Write 3-5 bullet points and one key insight.\n"
+        "Format your answer with exactly 3-5 concise bullet points. Avoid long paragraphs.\n"
+        "Provide one KEY INSIGHT (1-2 sentences max) that interprets the broader meaning, rather than simply repeating the summary.\n"
         "Do NOT return 'No response generated'."
     )
 

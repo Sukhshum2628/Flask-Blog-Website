@@ -377,7 +377,7 @@
 <script>
     const postId = "{{ post._id }}";
     // Prefer server progress if available, else local
-    const serverProgress = {{ server_progress|default(0) }};
+    const serverProgress = Number("{{ server_progress|default(0) }}");
     const storageKey = "read_progress_" + postId;
     
     // Existing Progress Bar
@@ -450,13 +450,13 @@
             const data = await response.json();
             
             if (data.summary && Array.isArray(data.summary)) {
-                let html = '### SUMMARY\n';
+                let html = '### SUMMARY\n\n';
                 data.summary.forEach(point => {
-                    html += `* ${point}\n`;
+                    html += `* ${point}\n\n`;
                 });
                 
                 if (data.insight) {
-                    html += `\n### KEY INSIGHT\n${data.insight}\n`;
+                    html += `### KEY INSIGHT\n\n${data.insight}\n\n`;
                 }
 
                 // Parse inline citations before appending source lists to avoid regex collisions
@@ -470,12 +470,12 @@
                 }
                 
                 if (data.sources && data.sources.length > 0) {
-                    html += '\n### SOURCES (BLOG)\n';
+                    html += '### SOURCES (BLOG)\n\n';
                     data.sources.forEach(src => {
-                        html += `* <span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n`;
+                        html += `<span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n\n`;
                     });
                 } else {
-                    html += '\n### SOURCES (BLOG)\n* No specific blog sections were cited.\n';
+                    html += '### SOURCES (BLOG)\n\n* No specific blog sections were cited.\n';
                 }
 
                 content.innerHTML = marked.parse(html);
@@ -545,17 +545,18 @@
             let html = '';
             
             if (data.summary && Array.isArray(data.summary) && data.summary.length > 0) {
+                html += '### SUMMARY\n\n';
                 data.summary.forEach(point => {
-                    html += `* ${point}\n`;
+                    html += `* ${point}\n\n`;
                 });
             } else if (data.answer) {
-                 html += data.answer + "\n"; // fallback if old schema is passed
+                 html += data.answer + "\n\n"; // fallback if old schema is passed
             } else {
-                 html += "Sorry, I couldn't get an answer.\n";
+                 html += "Sorry, I couldn't get an answer.\n\n";
             }
             
             if (data.insight) {
-                html += `\n*Insight*: ${data.insight}\n`;
+                html += `### KEY INSIGHT\n\n${data.insight}\n\n`;
             }
 
             if (data.citation_mapping) {
@@ -568,16 +569,16 @@
             }
             
             if (data.sources && data.sources.length > 0) {
-                html += '\n<hr>\n<div class="small text-muted mb-1"><strong>Sources (Blog)</strong></div>\n';
+                html += '<hr>\n<div class="small text-muted mb-2"><strong>SOURCES (BLOG)</strong></div>\n';
                 data.sources.forEach(src => {
-                    html += `* <span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n`;
+                    html += `<span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n\n`;
                 });
             }
             
             if (data.internet_sources && data.internet_sources.length > 0) {
-                html += '\n<div class="small text-muted mb-1 mt-2"><strong>Internet Sources</strong></div>\n';
+                html += '<div class="small text-muted mb-2 mt-2"><strong>INTERNET SOURCES</strong></div>\n';
                 data.internet_sources.forEach((src, idx) => {
-                    html += `${idx + 1}. [${src.title}](${src.url})\n`;
+                    html += `[${idx + 1}] [${src.title}](${src.url})\n\n`;
                 });
             }
 

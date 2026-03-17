@@ -71,47 +71,94 @@ def summarize_text(text):
             temperature=0.7,
             max_tokens=800
         )
+        raw_answer = completion.choices[0].message.content
         if not raw_answer:
             raw_answer = "SUMMARY\n• No response generated.\n\nKEY INSIGHT\nThe model returned an empty response."
+        print("RAW LLM RESPONSE:", raw_answer, flush=True)
 
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        if not context_chunks:
-            answer = raw_answer
-            citations = []
-            citation_mapping = {}
-        else:
-            # Map sentences to citations safely
-            answer, citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
-                
-        # Build Sources Output Manually safely
-        parts = answer.split("### SOURCES")
-        answer = parts[0]
-        if "### INTERNET SOURCES" in answer:
-             answer = answer.split("### INTERNET SOURCES")[0]
-        answer = answer.strip()
+        parsed_summary, parsed_insight = _parse_llm_response(raw_answer)
         
-        answer += "\n\n### SOURCES (BLOG)\n"
-        if not citations:
-            answer += "No specific blog sections were cited.\n"
-        else:
-            for display_num in citations:
-                actual_num = citation_mapping[str(display_num)]
-                excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
-                answer += f"[{display_num}] {excerpt}\n"
-                
-        answer += "\n### INTERNET SOURCES\nNo external sources used."
+        if not context_chunks:
+            return {
+                "summary": parsed_summary,
+                "insight": parsed_insight,
+                "sources": [],
+                "internet_sources": [],
+                "citation_mapping": {}
+            }
+
+        # Map sentences to citations safely (using the full raw_answer to get all points)
+        _, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
+        
+        # Build Sources Array
+        sources_data = []
+        for display_num in display_citations:
+            actual_num = citation_mapping[str(display_num)]
+            excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
+            sources_data.append({
+                "display_id": display_num,
+                "text": excerpt,
+                "internal_id": actual_num
+            })
 
         return {
-            "summary": answer,
-            "citations": citations,
+            "summary": parsed_summary,
+            "insight": parsed_insight,
+            "sources": sources_data,
+            "internet_sources": [],
             "citation_mapping": citation_mapping
         }
     except Exception as e:
         print(f"Error in summarize_text: {e}")
         print(traceback.format_exc())
-        return {"summary": "Failed to generate summary.", "citations": [], "citation_mapping": {}}
+        return {
+            "summary": ["Failed to generate summary."], 
+            "insight": "An error occurred.", 
+            "sources": [], 
+            "internet_sources": [],
+            "citation_mapping": {}
+        }
+
+def _parse_llm_response(text):
+    """Safely extracts summary points and insight from raw LLM text without crashing."""
+    summary_points = []
+    insight = ""
+    
+    if not text:
+        return ["No response generated."], "The model returned an empty response."
+        
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    current_section = "SUMMARY"
+    
+    for line in lines:
+        if "KEY INSIGHT" in line.upper():
+            current_section = "INSIGHT"
+            continue
+        elif "SUMMARY" in line.upper():
+            current_section = "SUMMARY"
+            continue
+            
+        if current_section == "SUMMARY":
+            if line.startswith('•') or line.startswith('-'):
+                summary_points.append(re.sub(r'^[\•\-]\s*', '', line))
+            elif line:
+                summary_points.append(line)
+        elif current_section == "INSIGHT":
+            if line:
+                insight += line + " "
+                
+    if not summary_points and not insight:
+        summary_points = [text]
+        insight = "No specific insight provided."
+    elif not summary_points:
+        summary_points = ["No summary points found."]
+    elif not insight:
+        insight = "No specific insight provided."
+        
+    return summary_points, insight.strip()
 
 def chunk_text(text):
     """Splits text into paragraphs and returns a list of chunks."""
@@ -255,62 +302,61 @@ def answer_question(context, question):
         if not raw_answer:
              raw_answer = "### SUMMARY\n• No response generated.\n\n### KEY INSIGHT\nNo insight generated."
 
+        print("RAW LLM RESPONSE:", raw_answer, flush=True)
+
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        if not context_chunks:
-             answer = raw_answer
-             citations = []
-             citation_mapping = {}
-        else:
-            # Map sentences to citations
-            answer, citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
-                
-        # Build Sources Output Manually safely
-        parts = answer.split("### SOURCES")
-        answer = parts[0]
-        if "### INTERNET SOURCES" in answer:
-            answer = answer.split("### INTERNET SOURCES")[0]
-        answer = answer.strip()
+        parsed_summary, parsed_insight = _parse_llm_response(raw_answer)
         
-        answer += "\n\n### SOURCES (BLOG)\n"
-        if not citations:
-            answer += "No specific blog sections were cited.\n"
-        else:
-            for display_num in citations:
-                actual_num = citation_mapping[str(display_num)]
-                excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
-                answer += f"[{display_num}] {excerpt}\n"
-                
-        answer += "\n### INTERNET SOURCES\n"
-        if not sources_list:
-            answer += "No external sources used."
-        else:
-            for i, src in enumerate(sources_list, 1):
-                answer += f"{i}. [{src['title']}]({src['url']})\n"
+        # Deduplicate internet sources based on URL
+        unique_net_sources = []
+        seen_urls = set()
+        for src in sources_list:
+            if src['url'] not in seen_urls:
+                unique_net_sources.append(src)
+                seen_urls.add(src['url'])
+        
+        if not context_chunks:
+            return {
+                "summary": parsed_summary,
+                "insight": parsed_insight,
+                "sources": [],
+                "internet_sources": unique_net_sources,
+                "citation_mapping": {}
+            }
+            
+        # Map sentences to citations safely
+        _, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
+        
+        sources_data = []
+        for display_num in display_citations:
+            actual_num = citation_mapping[str(display_num)]
+            excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
+            sources_data.append({
+                "display_id": display_num,
+                "text": excerpt,
+                "internal_id": actual_num
+            })
         
         return {
-            "answer": answer,
-            "citations": citations,
-            "citation_mapping": citation_mapping,
-            "sources": sources_list
+            "summary": parsed_summary,
+            "insight": parsed_insight,
+            "sources": sources_data,
+            "internet_sources": unique_net_sources,
+            "citation_mapping": citation_mapping
         }
     except Exception as e:
         print(f"AI ERROR (LLM): {e}", flush=True)
         print(traceback.format_exc(), flush=True)
         
         # Graceful fallback that preserves structure
-        fallback_answer = (
-            "### SUMMARY\n• Failed to generate answer.\n\n"
-            "### KEY INSIGHT\nAn error occurred. Please try again.\n\n"
-            "### SOURCES (BLOG)\nNo sources due to error.\n\n"
-            "### INTERNET SOURCES\nNo external sources used."
-        )
         return {
-            "answer": fallback_answer,
-            "citations": [],
-            "citation_mapping": {},
-            "sources": []
+            "summary": ["Failed to generate answer."],
+            "insight": "An error occurred. Please try again.",
+            "sources": [],
+            "internet_sources": [],
+            "citation_mapping": {}
         }
 
 def research_topic(topic):
@@ -336,9 +382,13 @@ def research_topic(topic):
         # 2. Prepare context for LLM
         sources_text = ""
         sources_list = []
+        seen_urls = set()
+        
         for result in search_results:
-            sources_text += f"Snippet from {result['url']}: {result['content']}\n\n"
-            sources_list.append({"title": result['title'], "url": result['url']})
+            if result['url'] not in seen_urls:
+                sources_text += f"Snippet from {result['url']}: {result['content']}\n\n"
+                sources_list.append({"title": result['title'], "url": result['url']})
+                seen_urls.add(result['url'])
 
         # 3. Summarize with LLM
         completion = client.chat.completions.create(

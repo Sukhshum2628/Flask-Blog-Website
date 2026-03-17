@@ -449,18 +449,36 @@
             const response = await fetch(`/ai/summarize/${postId}`, { method: 'POST' });
             const data = await response.json();
             
-            if (data.summary) {
-                let summaryText = data.summary;
+            if (data.summary && Array.isArray(data.summary)) {
+                let html = '### SUMMARY\n';
+                data.summary.forEach(point => {
+                    html += `* ${point}\n`;
+                });
+                
+                if (data.insight) {
+                    html += `\n### KEY INSIGHT\n${data.insight}\n`;
+                }
+
+                // Parse inline citations before appending source lists to avoid regex collisions
                 if (data.citation_mapping) {
-                    summaryText = summaryText.replace(/\[(\d+)\]/g, (match, p1) => {
+                    html = html.replace(/\[(\d+)\]/g, (match, p1) => {
                         const actualNum = data.citation_mapping[p1] || p1;
                         return `<span class="ai-citation" data-num="${actualNum}">[${p1}]</span>`;
                     });
                 } else {
-                    summaryText = summaryText.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
+                    html = html.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
                 }
                 
-                content.innerHTML = marked.parse(summaryText);
+                if (data.sources && data.sources.length > 0) {
+                    html += '\n### SOURCES (BLOG)\n';
+                    data.sources.forEach(src => {
+                        html += `* <span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n`;
+                    });
+                } else {
+                    html += '\n### SOURCES (BLOG)\n* No specific blog sections were cited.\n';
+                }
+
+                content.innerHTML = marked.parse(html);
                 area.classList.remove('d-none');
                 area.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -524,22 +542,48 @@
             
             // Removed redundant frontend ai-sources-panel. The LLM handles INTERNET SOURCES via markdown.
             
-            // Render Markdown Answer
-            let answer = data.answer || "Sorry, I couldn't get an answer.";
+            let html = '';
             
-            // Transform [n] citations into clickable buttons mapping to exact paragraphs
+            if (data.summary && Array.isArray(data.summary) && data.summary.length > 0) {
+                data.summary.forEach(point => {
+                    html += `* ${point}\n`;
+                });
+            } else if (data.answer) {
+                 html += data.answer + "\n"; // fallback if old schema is passed
+            } else {
+                 html += "Sorry, I couldn't get an answer.\n";
+            }
+            
+            if (data.insight) {
+                html += `\n*Insight*: ${data.insight}\n`;
+            }
+
             if (data.citation_mapping) {
-                answer = answer.replace(/\[(\d+)\]/g, (match, p1) => {
+                html = html.replace(/\[(\d+)\]/g, (match, p1) => {
                     const actualNum = data.citation_mapping[p1] || p1;
                     return `<span class="ai-citation" data-num="${actualNum}">[${p1}]</span>`;
                 });
             } else {
-                answer = answer.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
+                html = html.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
             }
             
+            if (data.sources && data.sources.length > 0) {
+                html += '\n<hr>\n<div class="small text-muted mb-1"><strong>Sources (Blog)</strong></div>\n';
+                data.sources.forEach(src => {
+                    html += `* <span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n`;
+                });
+            }
+            
+            if (data.internet_sources && data.internet_sources.length > 0) {
+                html += '\n<div class="small text-muted mb-1 mt-2"><strong>Internet Sources</strong></div>\n';
+                data.internet_sources.forEach((src, idx) => {
+                    html += `${idx + 1}. [${src.title}](${src.url})\n`;
+                });
+            }
+
             const answerDiv = document.createElement('div');
             answerDiv.className = 'ai-answer-content';
-            answerDiv.innerHTML = marked.parse(answer);
+            answerDiv.innerHTML = marked.parse(html);
             aiMsg.appendChild(answerDiv);
             
             body.appendChild(aiMsg);

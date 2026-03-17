@@ -8,11 +8,13 @@ Finally, the third paragraph touches on the ethical implications of AI. Bias in 
 
 print("--- TESTING SUMMARIZE ---")
 res1 = summarize_text(sample_blog_content)
-print(res1['summary'])
-print("Citations extracted:", res1['citations'])
+print("Summary Points:", res1['summary'])
+print("Insight:", res1['insight'])
+print("Sources:", res1['sources'])
 
 print("\n--- TESTING ANSWER QUESTION ---")
 res2 = answer_question(sample_blog_content, "What does the second paragraph say about machine learning?")
-print(res2['answer'])
-print("Citations extracted:", res2['citations'])
+print("Summary Points:", res2['summary'])
+print("Insight:", res2['insight'])
 print("Sources list:", res2['sources'])
+print("Internet Sources:", res2['internet_sources'])

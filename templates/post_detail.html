@@ -514,16 +514,7 @@
             const aiMsg = document.createElement('div');
             aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small';
             
-            // Render Sources Panel if available
-            if (data.sources && data.sources.length > 0) {
-                const sourcesDiv = document.createElement('div');
-                sourcesDiv.className = 'ai-sources-panel';
-                sourcesDiv.innerHTML = '<div class="fw-bold mb-1" style="font-size: 10px; color: #6c757d;">SOURCES</div>';
-                data.sources.forEach((s, idx) => {
-                    sourcesDiv.innerHTML += `<a href="${s.url}" target="_blank" class="source-tag" title="${s.title}">[${idx+1}] ${s.title}</a>`;
-                });
-                aiMsg.appendChild(sourcesDiv);
-            }
+            // Removed redundant frontend ai-sources-panel. The LLM handles INTERNET SOURCES via markdown.
             
             // Render Markdown Answer
             let answer = data.answer || "Sorry, I couldn't get an answer.";

@@ -722,8 +722,9 @@ def ai_summarize(post_id):
         if not post:
             return {'error': 'Post not found'}, 404
             
-        summary = ai_service.summarize_text(post.get('content', ''))
-        return {'summary': summary}
+        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+        result = ai_service.summarize_text(clean_text)
+        return result
     except Exception as e:
         print(f"AI SUMMARIZE ERROR: {e}", flush=True)
         return {'error': str(e)}, 500
@@ -764,6 +765,23 @@ def ai_research():
         return result
     except Exception as e:
         print(f"AI RESEARCH ERROR: {e}", flush=True)
+        return {'error': str(e)}, 500
+
+@app.route('/ai/improve-draft', methods=['POST'])
+def ai_improve_draft():
+    if 'user' not in session:
+        return {'error': 'Unauthorized'}, 401
+    
+    try:
+        data = request.get_json()
+        draft = data.get('draft')
+        if not draft:
+            return {'error': 'Draft is required'}, 400
+            
+        result = ai_service.improve_draft(draft)
+        return result
+    except Exception as e:
+        print(f"AI IMPROVE ERROR: {e}", flush=True)
         return {'error': str(e)}, 500
 
 @app.route('/post/<post_id>/edit', methods=['GET', 'POST'])

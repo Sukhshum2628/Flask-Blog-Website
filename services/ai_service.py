@@ -23,31 +23,60 @@ client = OpenAI(
     api_key=AI_API_KEY or "missing"
 )
 
+import re
+
 def summarize_text(text):
-    """Generates a concise summary of the provided text."""
+    """Generates a concise summary of the provided text with citations."""
     if not text:
-        return "No content to summarize."
+        return {"summary": "No content to summarize.", "citations": []}
     
-    # Simple chunking if text is too long (Step-3.5-Flash has 16k tokens, but good to be safe)
-    # For this blog, we'll just take the first 4000 words if it's huge.
-    words = text.split()
-    if len(words) > 4000:
-        text = " ".join(words[:4000])
+    # 1. Chunk the blog context for grounded citations
+    context_chunks = chunk_text(text)
+    chunked_context_str = "\n".join(context_chunks)
+
+    system_prompt = (
+        "You are a professional AI research assistant. Provide a concise summary of the following blog article. "
+        "The article is provided in numbered sections. "
+        "Your response MUST strictly follow this format and headers:\n\n"
+        "### SUMMARY\n"
+        "• [Key point 1 with citation [1]]\n"
+        "• [Key point 2 with citation [2]]\n\n"
+        "### REFERENCES\n"
+        "[1] [Brief excerpt from section 1]\n"
+        "[2] [Brief excerpt from section 2]\n\n"
+        "RULES:\n"
+        "- You MUST use numbered citations (e.g., [1], [2]) in the SUMMARY text.\n"
+        "- Only cite sections that match the provided text."
+    )
 
     try:
         completion = client.chat.completions.create(
             model=AI_MODEL,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that summarizes blog articles concisely."},
-                {"role": "user", "content": f"Please provide a concise summary of the following blog article:\n\n{text}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}"}
             ],
             temperature=0.7,
-            max_tokens=500
+            max_tokens=600
         )
-        return completion.choices[0].message.content
+        
+        answer = completion.choices[0].message.content
+        
+        # Parse citations to return structured IDs
+        citations = []
+        matches = re.findall(r'\[(\d+)\]', answer)
+        for m in matches:
+            num = int(m)
+            if num not in citations:
+                citations.append(num)
+
+        return {
+            "summary": answer,
+            "citations": citations
+        }
     except Exception as e:
         print(f"Error in summarize_text: {e}")
-        return "Failed to generate summary."
+        return {"summary": "Failed to generate summary.", "citations": []}
 
 def chunk_text(text):
     """Splits text into paragraphs and returns a numbered list of chunks."""
@@ -221,4 +250,50 @@ def get_related_posts(current_post, all_posts_list, limit=3):
     return related[:limit]
 
 import re
+import json
 from datetime import datetime
+
+def improve_draft(draft_text):
+    """Suggests improvements for a draft using AI and returns structured JSON."""
+    if not draft_text or not draft_text.strip():
+        return {"error": "Draft is empty."}
+        
+    system_prompt = (
+        "You are an expert AI writing assistant. Your task is to improve the provided blog draft.\n"
+        "Improve grammar, clarity, and structure while preserving the original meaning and tone.\n"
+        "Do NOT output markdown format blocks like ```json. You MUST return your response as a valid, parsable JSON object with the exact following keys:\n"
+        "{\n"
+        '  "improved_text": "The fully improved text (can include HTML tags if the original had them)",\n'
+        '  "changes": ["Changed X to Y for clarity", "Fixed grammar in paragraph 2"],\n'
+        '  "insights": ["The tone is engaging.", "Consider adding an example in the second section."],\n'
+        '  "sources": []\n'
+        "}\n"
+        "Respond ONLY with valid JSON."
+    )
+    
+    try:
+        completion = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Here is the draft:\n\n{draft_text}"}
+            ],
+            temperature=0.7,
+            max_tokens=2000
+        )
+        
+        content = completion.choices[0].message.content.strip()
+        
+        # Clean up potential markdown formatting
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+            
+        result_data = json.loads(content.strip())
+        return result_data
+    except Exception as e:
+        print(f"Error in improve_draft: {e}")
+        return {"error": "Failed to improve draft. Ensure your input is valid."}

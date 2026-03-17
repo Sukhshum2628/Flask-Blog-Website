@@ -450,7 +450,9 @@
             const data = await response.json();
             
             if (data.summary) {
-                content.innerText = data.summary;
+                let summaryText = data.summary;
+                summaryText = summaryText.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
+                content.innerHTML = marked.parse(summaryText);
                 area.classList.remove('d-none');
                 area.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }

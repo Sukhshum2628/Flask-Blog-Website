@@ -91,6 +91,12 @@
             </div>
 
             <div class="mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="form-label fw-bold text-muted small text-uppercase mb-0">Story Content</label>
+                    <button type="button" class="btn btn-sm btn-outline-primary rounded-pill" id="improveDraftBtn">
+                        <i class="bi bi-magic"></i> Improve with AI
+                    </button>
+                </div>
                 {{ form.content(id="editor", class="form-control", placeholder="Tell your story...") }}
                 {% if form.content.errors %}
                     <div class="text-danger small">{{ form.content.errors[0] }}</div>
@@ -123,6 +129,37 @@
             <p>Enter a topic to get summarized insights and links from the web.</p>
         </div>
     </div>
+</div>
+
+<!-- AI Draft Improvement Modal -->
+<div class="modal fade" id="draftImprovementModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title"><i class="bi bi-magic text-primary"></i> AI Draft Improvements</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="col-md-7 border-end">
+            <h6 class="text-muted text-uppercase small fw-bold">Improved Draft Preview</h6>
+            <div id="improvedDraftPreview" class="p-3 bg-light rounded border" style="min-height: 300px;"></div>
+          </div>
+          <div class="col-md-5">
+            <h6 class="text-muted text-uppercase small fw-bold">Changes Made</h6>
+            <ul id="draftChangesList" class="small mb-4 text-success"></ul>
+            
+            <h6 class="text-muted text-uppercase small fw-bold">AI Insights</h6>
+            <ul id="draftInsightsList" class="small text-secondary mb-4"></ul>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Discard</button>
+        <button type="button" class="btn btn-primary" id="acceptDraftChangesBtn">Accept Changes</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 {% endblock %}
@@ -188,6 +225,81 @@
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-send"></i>';
+        }
+    });
+
+    // AI Draft Assistant Logic
+    let improvedDraftCache = "";
+
+    document.getElementById('improveDraftBtn').addEventListener('click', async function() {
+        const btn = this;
+        const draftContent = $('#editor').trumbowyg('html'); // Get HTML from Trumbowyg
+        
+        if (!draftContent || draftContent.trim() === '') {
+            alert("Please write some content first before asking AI to improve it.");
+            return;
+        }
+
+        btn.disabled = true;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Improving...';
+
+        try {
+            const response = await fetch('/ai/improve-draft', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ draft: draftContent })
+            });
+            const data = await response.json();
+            
+            if (data.improved_text) {
+                improvedDraftCache = data.improved_text;
+                
+                // Populate Modal
+                document.getElementById('improvedDraftPreview').innerHTML = data.improved_text;
+                
+                const changesList = document.getElementById('draftChangesList');
+                changesList.innerHTML = '';
+                if (data.changes && data.changes.length > 0) {
+                    data.changes.forEach(c => {
+                        changesList.innerHTML += `<li>${c}</li>`;
+                    });
+                } else {
+                    changesList.innerHTML = '<li>No significant changes made.</li>';
+                }
+
+                const insightsList = document.getElementById('draftInsightsList');
+                insightsList.innerHTML = '';
+                if (data.insights && data.insights.length > 0) {
+                    data.insights.forEach(i => {
+                        insightsList.innerHTML += `<li>${i}</li>`;
+                    });
+                } else {
+                    insightsList.innerHTML = '<li>No specialized insights available.</li>';
+                }
+
+                // Show Modal
+                const modal = new bootstrap.Modal(document.getElementById('draftImprovementModal'));
+                modal.show();
+            } else if (data.error) {
+                alert("AI Error: " + data.error);
+            }
+        } catch (e) {
+            console.error("AI Draft Error:", e);
+            alert("An error occurred while connecting to the AI service.");
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    });
+
+    // Accept Changes
+    document.getElementById('acceptDraftChangesBtn').addEventListener('click', function() {
+        if (improvedDraftCache) {
+            $('#editor').trumbowyg('html', improvedDraftCache); // Non-destructive overwrite into editor
+            const modalEl = document.getElementById('draftImprovementModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            modal.hide();
         }
     });
 </script>

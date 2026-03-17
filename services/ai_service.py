@@ -31,9 +31,18 @@ def summarize_text(text):
     if not text:
         return {"summary": "No content to summarize.", "citations": []}
     
-    # 1. Chunk the blog context for grounded citations (plain text, NO numbers)
+    # 1. Chunk the blog context for grounded citations (alphabetical labels, NO numbers)
     context_chunks = chunk_text(text)
-    chunked_context_str = "\n".join(context_chunks)
+    
+    # Prefix chunks with alphabetical letters to give structure without index numbers
+    import string
+    alphabet = string.ascii_uppercase
+    labeled_chunks = []
+    for i, c in enumerate(context_chunks):
+        label = alphabet[i % 26] if i < 26 else f"{alphabet[(i//26)-1]}{alphabet[i%26]}"
+        labeled_chunks.append(f"Chunk {label}:\n{c}")
+    chunked_context_str = "\n\n".join(labeled_chunks)
+    
     max_chunk_id = len(context_chunks)
 
     system_prompt = (
@@ -68,13 +77,13 @@ def summarize_text(text):
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        # Guard clause for empty chunks
         if not context_chunks:
             answer = raw_answer
             citations = []
+            citation_mapping = {}
         else:
             # Map sentences to citations safely
-            answer, citations = _map_citations_to_text(raw_answer, context_chunks)
+            answer, citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
                 
         # Build Sources Output Manually safely
         parts = answer.split("### SOURCES")
@@ -87,20 +96,22 @@ def summarize_text(text):
         if not citations:
             answer += "No specific blog sections were cited.\n"
         else:
-            for num in sorted(citations):
-                excerpt = context_chunks[num-1][:100].strip() + ("..." if len(context_chunks[num-1]) > 100 else "")
-                answer += f"[{num}] {excerpt}\n"
+            for display_num in citations:
+                actual_num = citation_mapping[str(display_num)]
+                excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
+                answer += f"[{display_num}] {excerpt}\n"
                 
         answer += "\n### INTERNET SOURCES\nNo external sources used."
 
         return {
             "summary": answer,
-            "citations": citations
+            "citations": citations,
+            "citation_mapping": citation_mapping
         }
     except Exception as e:
         print(f"Error in summarize_text: {e}")
         print(traceback.format_exc())
-        return {"summary": "Failed to generate summary.", "citations": []}
+        return {"summary": "Failed to generate summary.", "citations": [], "citation_mapping": {}}
 
 def chunk_text(text):
     """Splits text into paragraphs and returns a list of chunks."""
@@ -119,16 +130,21 @@ def _get_jaccard_similarity(str1, str2):
     return len(intersection) / len(union)
 
 def _map_citations_to_text(llm_response, chunks):
-    """Maps LLM sentences back to original chunks to append reliable exact citations."""
+    """Maps LLM sentences back to original chunks to append reliable exact citations (normalized 1, 2, 3..)."""
     if not llm_response:
-        return "", []
+        return "", [], {}
     if not chunks:
-        return llm_response, []
+        return llm_response, [], {}
 
     lines = llm_response.split('\n')
     mapped_lines = []
-    all_cited_ids = set()
-
+    
+    # mapping actual chunk indices to sequential display numbers
+    # tracking order they appear in
+    actual_to_display = {}
+    display_to_actual = {} # frontend format {"1": 15}
+    current_display_num = 1
+    
     # We map list items or Insight sentences
     for line in lines:
         if line.startswith('•') or (len(line.strip()) > 20 and not line.startswith('###')):
@@ -143,15 +159,23 @@ def _map_citations_to_text(llm_response, chunks):
             
             # If there's a reasonable overlap, cite it
             if best_score > 0.1 and best_match_idx != -1:
-                chunk_num = best_match_idx + 1 # 1-indexed
-                all_cited_ids.add(chunk_num)
+                chunk_num = best_match_idx + 1 # 1-indexed (actual)
+                
+                if chunk_num not in actual_to_display:
+                    actual_to_display[chunk_num] = current_display_num
+                    display_to_actual[str(current_display_num)] = chunk_num
+                    current_display_num += 1
+                
+                display_num = actual_to_display[chunk_num]
+                
                 # Avoid double-citing if it's already at the end of the line somehow
-                if not line.endswith(f"[{chunk_num}]"):
-                    line = f"{line.strip()} [{chunk_num}]"
+                if not line.endswith(f"[{display_num}]"):
+                    line = f"{line.strip()} [{display_num}]"
         
         mapped_lines.append(line)
 
-    return "\n".join(mapped_lines), list(all_cited_ids)
+    display_citations = sorted([int(k) for k in display_to_actual.keys()])
+    return "\n".join(mapped_lines), display_citations, display_to_actual
 
 def answer_question(context, question):
     """Answers a question with grounded citations from the blog content."""
@@ -162,7 +186,15 @@ def answer_question(context, question):
 
     # 1. Chunk the blog context for grounded citations
     context_chunks = chunk_text(context)
-    chunked_context_str = "\n".join(context_chunks)
+    
+    import string
+    alphabet = string.ascii_uppercase
+    labeled_chunks = []
+    for i, c in enumerate(context_chunks):
+        label = alphabet[i % 26] if i < 26 else f"{alphabet[(i//26)-1]}{alphabet[i%26]}"
+        labeled_chunks.append(f"Chunk {label}:\n{c}")
+    chunked_context_str = "\n\n".join(labeled_chunks)
+    
     max_chunk_id = len(context_chunks)
 
     search_context = ""
@@ -229,9 +261,10 @@ def answer_question(context, question):
         if not context_chunks:
              answer = raw_answer
              citations = []
+             citation_mapping = {}
         else:
             # Map sentences to citations
-            answer, citations = _map_citations_to_text(raw_answer, context_chunks)
+            answer, citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
                 
         # Build Sources Output Manually safely
         parts = answer.split("### SOURCES")
@@ -244,9 +277,10 @@ def answer_question(context, question):
         if not citations:
             answer += "No specific blog sections were cited.\n"
         else:
-            for num in sorted(citations):
-                excerpt = context_chunks[num-1][:100].strip() + ("..." if len(context_chunks[num-1]) > 100 else "")
-                answer += f"[{num}] {excerpt}\n"
+            for display_num in citations:
+                actual_num = citation_mapping[str(display_num)]
+                excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
+                answer += f"[{display_num}] {excerpt}\n"
                 
         answer += "\n### INTERNET SOURCES\n"
         if not sources_list:
@@ -258,6 +292,7 @@ def answer_question(context, question):
         return {
             "answer": answer,
             "citations": citations,
+            "citation_mapping": citation_mapping,
             "sources": sources_list
         }
     except Exception as e:
@@ -274,6 +309,7 @@ def answer_question(context, question):
         return {
             "answer": fallback_answer,
             "citations": [],
+            "citation_mapping": {},
             "sources": []
         }
 

@@ -716,18 +716,28 @@ def bookmark_post(post_id):
 # AI Routes
 @app.route('/ai/summarize/<post_id>', methods=['POST'])
 def ai_summarize(post_id):
-    # Public route: removed 'user' in session check
     try:
+        from flask import jsonify
         post = posts.find_one({'_id': ObjectId(post_id)})
         if not post:
-            return {'error': 'Post not found'}, 404
-            
-        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+            return jsonify({'error': 'Post not found'}), 404
+        import re
+        raw_content = post.get('content', '')
+        spaced_content = re.sub(r'<(p|br|div|h[1-6])[^>]*>', '\n', raw_content, flags=re.IGNORECASE)
+        clean_text = bleach.clean(spaced_content, tags=[], strip=True)
         result = ai_service.summarize_text(clean_text)
-        return result
+        
+        # Ensure result is safely returned even if structure varies
+        if isinstance(result, dict) and 'summary' in result:
+            return jsonify(result)
+        else:
+            # Fallback
+            return jsonify({"summary": str(result), "citations": []})
+            
     except Exception as e:
         print(f"AI SUMMARIZE ERROR: {e}", flush=True)
-        return {'error': str(e)}, 500
+        from flask import jsonify
+        return jsonify({"summary": "An error occurred while linking to the AI. Please try again later.", "citations": []}), 500
 
 @app.route('/ai/ask/<post_id>', methods=['POST'])
 def ai_ask(post_id):
@@ -740,14 +750,24 @@ def ai_ask(post_id):
             
         post = posts.find_one({'_id': ObjectId(post_id)})
         if not post:
-            return {'error': 'Post not found'}, 404
+            return jsonify({'error': 'Post not found'}), 404
             
-        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+        import re
+        raw_content = post.get('content', '')
+        spaced_content = re.sub(r'<(p|br|div|h[1-6])[^>]*>', '\n', raw_content, flags=re.IGNORECASE)
+        clean_text = bleach.clean(spaced_content, tags=[], strip=True)
+        
         result = ai_service.answer_question(clean_text, question)
-        return result
+        
+        if isinstance(result, dict) and 'answer' in result:
+            return jsonify(result)
+        else:
+            return jsonify({"answer": str(result), "sources": []})
+            
     except Exception as e:
         print(f"AI ASK ERROR: {e}", flush=True)
-        return {'error': str(e)}, 500
+        from flask import jsonify
+        return jsonify({'error': str(e), 'answer': 'An error occurred.', 'sources': []}), 500
 
 @app.route('/ai/research', methods=['POST'])
 def ai_research():

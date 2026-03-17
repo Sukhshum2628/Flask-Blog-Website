@@ -731,11 +731,11 @@ def ai_summarize(post_id):
             return jsonify(result)
         else:
             # Fallback
-            return jsonify({"summary": str(result), "citations": []})
+            return jsonify({"summary": [str(result)], "insight": "No specific insight provided.", "sources": [], "internet_sources": [], "citation_mapping": {}})
             
     except Exception as e:
         print(f"AI SUMMARIZE ERROR: {e}", flush=True)
-        return jsonify({"summary": "An error occurred while linking to the AI. Please try again later.", "citations": []}), 500
+        return jsonify({"summary": ["An error occurred while linking to the AI. Please try again later."], "insight": "An error occurred.", "sources": [], "internet_sources": [], "citation_mapping": {}}), 500
 
 @app.route('/ai/ask/<post_id>', methods=['POST'])
 def ai_ask(post_id):
@@ -757,14 +757,14 @@ def ai_ask(post_id):
         
         result = ai_service.answer_question(clean_text, question)
         
-        if isinstance(result, dict) and 'answer' in result:
+        if isinstance(result, dict) and 'summary' in result:
             return jsonify(result)
         else:
-            return jsonify({"answer": str(result), "sources": []})
+            return jsonify({"summary": [str(result)], "insight": "No specific insight provided.", "sources": [], "internet_sources": [], "citation_mapping": {}})
             
     except Exception as e:
         print(f"AI ASK ERROR: {e}", flush=True)
-        return jsonify({'error': str(e), 'answer': 'An error occurred.', 'sources': []}), 500
+        return jsonify({"summary": ["An error occurred while linking to the AI."], "insight": "An error occurred.", "sources": [], "internet_sources": [], "citation_mapping": {}}), 500
 
 @app.route('/ai/research', methods=['POST'])
 def ai_research():

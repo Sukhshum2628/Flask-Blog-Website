@@ -127,13 +127,11 @@ def _parse_llm_response(text, fallback_context=None):
     summary_points = []
     insight = ""
     
-    # Check for empty completion or specific LLM refusal
-    is_failed_response = not text or "No response generated" in text or len(text.strip()) < 10
-    
-    if is_failed_response:
+    # Check for genuinely empty completion
+    if not text or not text.strip():
         if fallback_context:
             fallback_text = fallback_context[:250].strip() + ("..." if len(fallback_context) > 250 else "")
-            return [f"Summary generated from context: {fallback_text}"], "The AI model could not process this request structure, but here is the blog's introductory context."
+            return [f"Summary generated from context: {fallback_text}"], "The AI model returned an empty response, but here is the blog's introductory context."
         return ["No response generated."], "The model returned an empty response."
         
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -156,11 +154,13 @@ def _parse_llm_response(text, fallback_context=None):
             if line:
                 insight += line + " "
                 
+    # If the LLM completely ignored formatting, use the raw text as the summary
     if not summary_points and not insight:
-        summary_points = [text]
-        insight = "No specific insight provided."
+        summary_points = [text.strip()]
+        insight_preview = text.strip()[:100] + ("..." if len(text.strip()) > 100 else "")
+        insight = f"Insight derived from raw summary: {insight_preview}"
     elif not summary_points:
-        summary_points = ["No summary points found."]
+        summary_points = [text.strip()]
     elif not insight:
         insight = "No specific insight provided."
         

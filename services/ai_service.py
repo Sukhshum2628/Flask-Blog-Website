@@ -1,5 +1,6 @@
 import os
 import requests
+import traceback
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -49,6 +50,8 @@ def summarize_text(text):
         "- Do NOT generate a SOURCES section."
     )
 
+    raw_answer = None
+
     try:
         completion = client.chat.completions.create(
             model=AI_MODEL,
@@ -59,17 +62,27 @@ def summarize_text(text):
             temperature=0.7,
             max_tokens=800
         )
-        
-        raw_answer = completion.choices[0].message.content
-        
+        if not raw_answer:
+            raw_answer = "SUMMARY\n• No response generated.\n\nKEY INSIGHT\nThe model returned an empty response."
+
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        # Map sentences to citations
-        answer, citations = _map_citations_to_text(raw_answer, context_chunks)
+        # Guard clause for empty chunks
+        if not context_chunks:
+            answer = raw_answer
+            citations = []
+        else:
+            # Map sentences to citations safely
+            answer, citations = _map_citations_to_text(raw_answer, context_chunks)
                 
-        # Build Sources Output Manually
-        answer = answer.split("### SOURCES")[0].split("### INTERNET SOURCES")[0].strip() # Just in case it hallucinated them
+        # Build Sources Output Manually safely
+        parts = answer.split("### SOURCES")
+        answer = parts[0]
+        if "### INTERNET SOURCES" in answer:
+             answer = answer.split("### INTERNET SOURCES")[0]
+        answer = answer.strip()
+        
         answer += "\n\n### SOURCES (BLOG)\n"
         if not citations:
             answer += "No specific blog sections were cited.\n"
@@ -86,6 +99,7 @@ def summarize_text(text):
         }
     except Exception as e:
         print(f"Error in summarize_text: {e}")
+        print(traceback.format_exc())
         return {"summary": "Failed to generate summary.", "citations": []}
 
 def chunk_text(text):
@@ -106,6 +120,11 @@ def _get_jaccard_similarity(str1, str2):
 
 def _map_citations_to_text(llm_response, chunks):
     """Maps LLM sentences back to original chunks to append reliable exact citations."""
+    if not llm_response:
+        return "", []
+    if not chunks:
+        return llm_response, []
+
     lines = llm_response.split('\n')
     mapped_lines = []
     all_cited_ids = set()
@@ -189,6 +208,8 @@ def answer_question(context, question):
     user_content = f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}\n\n"
     user_content += f"USER QUESTION: {question}"
 
+    raw_answer = None
+
     try:
         completion = client.chat.completions.create(
             model=AI_MODEL,
@@ -199,17 +220,26 @@ def answer_question(context, question):
             temperature=0.7,
             max_tokens=1024
         )
-        
-        raw_answer = completion.choices[0].message.content
-        
+        if not raw_answer:
+             raw_answer = "### SUMMARY\n• No response generated.\n\n### KEY INSIGHT\nNo insight generated."
+
         # Strip any rogue citations if the LLM hallucinated them despite the prompt
         raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
         
-        # Map sentences to citations
-        answer, citations = _map_citations_to_text(raw_answer, context_chunks)
+        if not context_chunks:
+             answer = raw_answer
+             citations = []
+        else:
+            # Map sentences to citations
+            answer, citations = _map_citations_to_text(raw_answer, context_chunks)
                 
-        # Build Sources Output Manually
-        answer = answer.split("### SOURCES")[0].split("### INTERNET SOURCES")[0].strip() # Just in case it hallucinated them
+        # Build Sources Output Manually safely
+        parts = answer.split("### SOURCES")
+        answer = parts[0]
+        if "### INTERNET SOURCES" in answer:
+            answer = answer.split("### INTERNET SOURCES")[0]
+        answer = answer.strip()
+        
         answer += "\n\n### SOURCES (BLOG)\n"
         if not citations:
             answer += "No specific blog sections were cited.\n"
@@ -227,12 +257,23 @@ def answer_question(context, question):
         
         return {
             "answer": answer,
+            "citations": citations,
             "sources": sources_list
         }
     except Exception as e:
         print(f"AI ERROR (LLM): {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
+        
+        # Graceful fallback that preserves structure
+        fallback_answer = (
+            "### SUMMARY\n• Failed to generate answer.\n\n"
+            "### KEY INSIGHT\nAn error occurred. Please try again.\n\n"
+            "### SOURCES (BLOG)\nNo sources due to error.\n\n"
+            "### INTERNET SOURCES\nNo external sources used."
+        )
         return {
-            "answer": "### SUMMARY\n• Failed to generate answer.\n\n### KEY INSIGHT\nAn error occurred. Please try again.\n\n### INTERNET SOURCES\nNo external sources used.",
+            "answer": fallback_answer,
+            "citations": [],
             "sources": []
         }
 

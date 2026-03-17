@@ -44,16 +44,12 @@ def summarize_text(text):
         "• [Key point 2 with citation [2]]\n\n"
         "### KEY INSIGHT\n"
         "[A short explanation of the main idea]\n\n"
-        "### SOURCES (BLOG)\n"
-        "[1] [Brief excerpt from section 1]\n"
-        "[2] [Brief excerpt from section 2]\n\n"
-        "### INTERNET SOURCES\n"
-        "No external sources used.\n\n"
         "RULES:\n"
         "- ONLY use the exact provided section numbers (e.g., [1], [2]).\n"
         "- Do NOT invent or guess citations.\n"
         "- Do NOT generate citation ranges (e.g., avoid [4-10]). Cite each individually like [4] [5].\n"
-        "- Only cite sections that match the provided text."
+        "- Only cite sections that match the provided text.\n"
+        "- Do NOT generate a SOURCES section. The system will append it."
     )
 
     try:
@@ -67,10 +63,10 @@ def summarize_text(text):
             max_tokens=800
         )
         
-        answer = completion.choices[0].message.content
+        raw_answer = completion.choices[0].message.content
         
         # Backend Validation: Prevent citation ranges and clean invalid ones
-        answer = re.sub(r'\[(\d+)\s*-\s*\d+\]', r'[\1]', answer)  # convert [4-14] to [4]
+        answer = re.sub(r'\[(\d+)\s*-\s*\d+\]', r'[\1]', raw_answer)  # convert [4-14] to [4]
         
         def replace_invalid_citation(match):
             num = int(match.group(1))
@@ -87,6 +83,19 @@ def summarize_text(text):
             num = int(m)
             if num not in citations:
                 citations.append(num)
+                
+        # Build Sources Output Manually
+        answer = answer.split("### SOURCES")[0].split("### INTERNET SOURCES")[0].strip() # Just in case it hallucinated them
+        answer += "\n\n### SOURCES (BLOG)\n"
+        if not citations:
+            answer += "No specific blog sections were cited.\n"
+        else:
+            for num in sorted(citations):
+                text_snippet = context_chunks[num-1].split('] ', 1)[-1]
+                excerpt = text_snippet[:100].strip() + ("..." if len(text_snippet) > 100 else "")
+                answer += f"[{num}] {excerpt}\n"
+                
+        answer += "\n### INTERNET SOURCES\nNo external sources used."
 
         return {
             "summary": answer,
@@ -152,17 +161,13 @@ def answer_question(context, question):
         "• [Key point 2 with citation [2]]\n\n"
         "### KEY INSIGHT\n"
         "[A short explanation of the main takeaway in simple terms.]\n\n"
-        "### SOURCES (BLOG)\n"
-        "[1] [Brief excerpt from section 1]\n\n"
-        "### INTERNET SOURCES\n"
-        + ("*Please list internet sources as clickable Markdown links like `[Title](URL)`*\n" if has_internet_sources else "No external sources used.\n") +
-        "\nRULES:\n"
+        "RULES:\n"
         "- ONLY use the exact provided numbered blog citations (e.g., [1], [2]).\n"
         "- Do NOT invent or guess citations.\n"
         "- Do NOT generate citation ranges (e.g., avoid [4-10]). Cite each individually like [4] [5].\n"
-        "- Only display internet sources if they are explicitly provided in the WEB SEARCH FINDINGS.\n"
         "- Keep the total length between 120 and 150 words.\n"
-        "- Avoid long paragraphs; keep it crisp."
+        "- Avoid long paragraphs; keep it crisp.\n"
+        "- Do NOT generate a SOURCES section. The system will append it."
     )
 
     user_content = f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}\n\n"
@@ -182,10 +187,10 @@ def answer_question(context, question):
             max_tokens=1024
         )
         
-        answer = completion.choices[0].message.content
+        raw_answer = completion.choices[0].message.content
         
         # Backend Validation: Prevent citation ranges and clean invalid ones
-        answer = re.sub(r'\[(\d+)\s*-\s*\d+\]', r'[\1]', answer)
+        answer = re.sub(r'\[(\d+)\s*-\s*\d+\]', r'[\1]', raw_answer)
         
         def replace_invalid_citation(match):
             num = int(match.group(1))
@@ -194,6 +199,32 @@ def answer_question(context, question):
             return str(num)
             
         answer = re.sub(r'\[(\d+)\]', replace_invalid_citation, answer)
+        
+        # Extract validated citations
+        citations = []
+        matches = re.findall(r'\[(\d+)\]', answer)
+        for m in matches:
+            num = int(m)
+            if num not in citations:
+                citations.append(num)
+                
+        # Build Sources Output Manually
+        answer = answer.split("### SOURCES")[0].split("### INTERNET SOURCES")[0].strip() # Just in case it hallucinated them
+        answer += "\n\n### SOURCES (BLOG)\n"
+        if not citations:
+            answer += "No specific blog sections were cited.\n"
+        else:
+            for num in sorted(citations):
+                text_snippet = context_chunks[num-1].split('] ', 1)[-1]
+                excerpt = text_snippet[:100].strip() + ("..." if len(text_snippet) > 100 else "")
+                answer += f"[{num}] {excerpt}\n"
+                
+        answer += "\n### INTERNET SOURCES\n"
+        if not sources_list:
+            answer += "No external sources used."
+        else:
+            for i, src in enumerate(sources_list, 1):
+                answer += f"{i}. [{src['title']}]({src['url']})\n"
         
         return {
             "answer": answer,

@@ -519,10 +519,15 @@ def search():
         results = []
     
     for post in results:
-         clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-         post['read_time'] = get_reading_time(clean_text)
+        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+        post['read_time'] = get_reading_time(clean_text)
 
-    return render_template('index.html', posts=results, search_query=query)
+    # Fetch author avatars for search results
+    authors_list = list(set(p['author'] for p in results))
+    author_avatars = {u['username']: u.get('avatar_url') for u in users.find({'username': {'$in': authors_list}}, {'username': 1, 'avatar_url': 1})}
+    trending_posts = get_trending_posts()
+
+    return render_template('index.html', posts=results, search_query=query, trending_posts=trending_posts, author_avatars=author_avatars, current_tab='search')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():

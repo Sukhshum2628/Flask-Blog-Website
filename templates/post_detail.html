@@ -12,96 +12,46 @@
         height: 4px;
         background: transparent;
     }
+    /* Editorial Reading Width */
+    .post-article-body {
+        max-width: 680px;
+        margin: 0 auto;
+        font-size: 1.125rem;
+        line-height: 1.8;
+    }
     .progress-bar {
         height: 4px;
-        background: #198754;
+        background: linear-gradient(90deg, #198754, #4ecdc4);
         width: 0%;
         transition: width 0.1s;
     }
-    .ai-chat-widget {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1050;
-    }
-    .ai-chat-card {
-        width: 350px;
-        border-radius: 15px;
-        overflow: hidden;
-        display: none;
-        backdrop-filter: blur(10px);
-        background: rgba(255, 255, 255, 0.9);
-    }
-    .ai-bubble {
-        cursor: pointer;
-        width: 60px;
-        height: 60px;
-        border-radius: 50%;
-        background: #198754;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        transition: transform 0.3s;
-    }
-    .ai-bubble:hover {
-        transform: scale(1.1);
-    }
-    /* Markdown Styles in Chat */
-    .ai-message ul, .ai-message ol {
-        padding-left: 20px;
-        margin-bottom: 10px;
-    }
-    .ai-message p {
-        margin-bottom: 8px;
-    }
-    .ai-message code {
-        background: #f4f4f4;
-        padding: 2px 4px;
-        border-radius: 4px;
-    }
-    /* Citation Highlight - Subtle */
-    .ai-content-section {
-        transition: all 0.5s ease;
-        border-left: 3px solid transparent;
-        padding-left: 10px;
-        margin-left: -13px;
-    }
-    .ai-highlight-active {
-        background-color: #fff3cd; /* Subtle mark-like color */
-        border-left-color: #ffc107;
-    }
-    .ai-citation:hover {
-        background-color: #e9ecef;
-    }
-    /* Sources Panel */
-    .ai-sources-panel {
+    /* AI Summary Card */
+    .ai-summary-card {
         background: #f8f9fa;
-        border-bottom: 1px solid #dee2e6;
-        margin: -8px -8px 10px -8px;
-        padding: 8px;
-        border-radius: 8px 8px 0 0;
+        border-left: 4px solid #198754;
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin-bottom: 2rem;
     }
-    .source-tag {
+    /* Streaming Cursor */
+    .streaming::after {
+        content: '▋';
         display: inline-block;
-        font-size: 10px;
-        background: #e9ecef;
-        padding: 2px 6px;
-        border-radius: 10px;
-        margin-right: 5px;
-        margin-bottom: 5px;
-        color: #495057;
-        text-decoration: none;
-        max-width: 150px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        vertical-align: middle;
+        animation: blink 1s step-end infinite;
+        margin-left: 4px;
+        color: #198754;
     }
-    .source-tag:hover {
-        background: #dee2e6;
-        color: #212529;
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    
+    /* Code block styling */
+    pre {
+        background: #1e1e1e;
+        color: #dcdcdc;
+        padding: 1rem;
+        border-radius: 8px;
+        position: relative;
+        font-family: 'Fira Code', monospace;
     }
 </style>
 {% endblock %}
@@ -139,43 +89,22 @@
                 </div>
             {% endif %}
 
-            <div id="aiSummaryArea" class="p-3 bg-success-subtle border-start border-4 border-success mb-4 d-none" style="border-radius: 0 10px 10px 0;">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="fw-bold text-success"><i class="bi bi-robot"></i> AI Summary</span>
-                    <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('aiSummaryArea').classList.add('d-none')"></button>
-                </div>
-                <div id="aiSummaryContent" class="small text-dark"></div>
-            </div>
-
-            <div class="d-flex align-items-center mb-4">
-                <img src="{{ author.avatar_url or 'https://ui-avatars.com/api/?name=' + post.author }}" 
-                     alt="{{ post.author }}" class="rounded-circle me-3" width="48" height="48">
-                <div>
-                    <div class="fw-bold">
-                        <a href="{{ url_for('profile', username=post.author) }}" class="text-decoration-none text-dark">{{ post.author }}</a>
-                    </div>
-                    <div class="text-muted small">
-                        {{ post.created_at.strftime('%b %d, %Y') if post.created_at else '' }}
-                        {% if post.updated_at and post.updated_at > post.created_at %}
-                            (Updated {{ post.updated_at|time_ago }})
-                        {% endif %}
-                        · {{ read_time }} min read
-                        {% if active_readers > 1 %}
-                            · <span class="text-success fw-bold"><i class="bi bi-people-fill"></i> {{ active_readers }} people reading now</span>
-                        {% endif %}
-                        {% if is_author %}
-                            · <a href="{{ url_for('edit_post', post_id=post._id) }}" class="text-secondary">Edit</a>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-
-            <div class="post-content fs-5 serif-font">
+            <div class="post-article-body serif-font">
                 {% if post.cover_url %}
                     <figure class="mb-4" data-aos="fade-in">
                         <img src="{{ post.cover_url }}" class="img-fluid rounded w-100" alt="Cover Image">
                     </figure>
                 {% endif %}
+
+                <!-- AI Summary Card (Moved below cover) -->
+                <div id="aiSummaryArea" class="ai-summary-card d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span class="fw-bold text-success small text-uppercase" style="letter-spacing: 1px;">✦ AI Summary</span>
+                        <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('aiSummaryArea').classList.add('d-none')"></button>
+                    </div>
+                    <div id="aiSummaryContent" class="small text-dark"></div>
+                </div>
+
                 {{ post.content|safe }}
             </div>
 
@@ -336,7 +265,7 @@
 </div>
 
 <!-- Ask AI Widget -->
-<div class="ai-chat-widget">
+<div class="ai-chat-widget" id="ai-panel-container">
     <div class="ai-chat-card card shadow-lg mb-3" id="aiChatCard">
         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center py-3">
             <span class="fw-bold"><i class="bi bi-robot"></i> Ask AI about this article</span>
@@ -427,9 +356,7 @@
             window.scrollTo({
                 top: startPos,
                 behavior: 'smooth'
-            });
-            
-            // Show toast
+            window.scrollTo({ top: startPos, behavior: 'smooth' });
             const toastEl = document.getElementById('progressToast');
             const toast = new bootstrap.Toast(toastEl);
             toast.show();
@@ -443,42 +370,24 @@
         const content = document.getElementById('aiSummaryContent');
         
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Summarizing...';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Analyzing...';
         
         try {
             const response = await fetch(`/ai/summarize/${postId}`, { method: 'POST' });
             const data = await response.json();
             
             if (data.summary && Array.isArray(data.summary)) {
-                let html = '### SUMMARY\n\n';
+                let html = '<ul class="mb-3">';
                 data.summary.forEach(point => {
-                    html += `* ${point}\n\n`;
+                    html += `<li class="mb-2">${point}</li>`;
                 });
+                html += '</ul>';
                 
                 if (data.insight) {
-                    html += `### KEY INSIGHT\n\n${data.insight}\n\n`;
+                    html += `<div class="p-2 border-top small text-muted font-monospace">KEY INSIGHT: ${data.insight}</div>`;
                 }
 
-                // Parse inline citations before appending source lists to avoid regex collisions
-                if (data.citation_mapping) {
-                    html = html.replace(/\[(\d+)\]/g, (match, p1) => {
-                        const actualNum = data.citation_mapping[p1] || p1;
-                        return `<span class="ai-citation" data-num="${actualNum}">[${p1}]</span>`;
-                    });
-                } else {
-                    html = html.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
-                }
-                
-                if (data.sources && data.sources.length > 0) {
-                    html += '### SOURCES (BLOG)\n\n';
-                    data.sources.forEach(src => {
-                        html += `<span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n\n`;
-                    });
-                } else {
-                    html += '### SOURCES (BLOG)\n\n* No specific blog sections were cited.\n';
-                }
-
-                content.innerHTML = marked.parse(html);
+                content.innerHTML = html;
                 area.classList.remove('d-none');
                 area.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -490,22 +399,15 @@
         }
     });
 
-    // AI Chat Toggle
-    function toggleAIChat() {
-        const card = document.getElementById('aiChatCard');
-        if (card.style.display === 'block') {
-            card.style.display = 'none';
-        } else {
-            card.style.display = 'block';
+    // Lazy Load AI Panel
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+            observer.disconnect();
         }
-    }
+    }, { threshold: 0.1 });
+    observer.observe(document.getElementById('ai-panel-container'));
 
-    // AI Question
-    document.getElementById('sendQuestionBtn').addEventListener('click', sendQuestion);
-    document.getElementById('aiQuestionInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') sendQuestion();
-    });
-
+    // Streaming AI Chat
     async function sendQuestion() {
         const input = document.getElementById('aiQuestionInput');
         const body = document.getElementById('aiChatBody');
@@ -513,7 +415,6 @@
         
         if (!question) return;
         
-        // Add user message
         const userMsg = document.createElement('div');
         userMsg.className = 'user-message bg-success-subtle p-2 rounded mb-2 small text-end ms-auto';
         userMsg.style.maxWidth = '80%';
@@ -522,77 +423,40 @@
         input.value = '';
         body.scrollTop = body.scrollHeight;
         
-        // Add typing indicator
-        const typing = document.createElement('div');
-        typing.className = 'ai-message bg-light p-2 rounded mb-2 small';
-        typing.innerHTML = '<span class="spinner-grow spinner-grow-sm"></span> Thinking...';
-        body.appendChild(typing);
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small streaming';
+        body.appendChild(aiMsg);
         
         try {
-            const response = await fetch(`/ai/ask/${postId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question })
-            });
-            const data = await response.json();
+            const eventSource = new EventSource(`/api/chat/stream/${postId}?question=${encodeURIComponent(question)}`);
             
-            body.removeChild(typing);
-            const aiMsg = document.createElement('div');
-            aiMsg.className = 'ai-message bg-light p-2 rounded mb-2 small';
+            eventSource.onmessage = function(e) {
+                if (e.data.startsWith("[ERROR]")) {
+                    aiMsg.innerText = "Error: " + e.data.substring(7);
+                    eventSource.close();
+                    aiMsg.classList.remove('streaming');
+                } else {
+                    aiMsg.innerText += e.data;
+                    body.scrollTop = body.scrollHeight;
+                }
+            };
             
-            // Removed redundant frontend ai-sources-panel. The LLM handles INTERNET SOURCES via markdown.
-            
-            let html = '';
-            
-            if (data.summary && Array.isArray(data.summary) && data.summary.length > 0) {
-                html += '### SUMMARY\n\n';
-                data.summary.forEach(point => {
-                    html += `* ${point}\n\n`;
-                });
-            } else if (data.answer) {
-                 html += data.answer + "\n\n"; // fallback if old schema is passed
-            } else {
-                 html += "Sorry, I couldn't get an answer.\n\n";
-            }
-            
-            if (data.insight) {
-                html += `### KEY INSIGHT\n\n${data.insight}\n\n`;
-            }
-
-            if (data.citation_mapping) {
-                html = html.replace(/\[(\d+)\]/g, (match, p1) => {
-                    const actualNum = data.citation_mapping[p1] || p1;
-                    return `<span class="ai-citation" data-num="${actualNum}">[${p1}]</span>`;
-                });
-            } else {
-                html = html.replace(/\[(\d+)\]/g, '<span class="ai-citation" data-num="$1">[$1]</span>');
-            }
-            
-            if (data.sources && data.sources.length > 0) {
-                html += '<hr>\n<div class="small text-muted mb-2"><strong>SOURCES (BLOG)</strong></div>\n';
-                data.sources.forEach(src => {
-                    html += `<span class="ai-citation" data-num="${src.internal_id}">[${src.display_id}]</span> ${src.text}\n\n`;
-                });
-            }
-            
-            if (data.internet_sources && data.internet_sources.length > 0) {
-                html += '<div class="small text-muted mb-2 mt-2"><strong>INTERNET SOURCES</strong></div>\n';
-                data.internet_sources.forEach((src, idx) => {
-                    html += `[${idx + 1}] [${src.title}](${src.url})\n\n`;
-                });
-            }
-
-            const answerDiv = document.createElement('div');
-            answerDiv.className = 'ai-answer-content';
-            answerDiv.innerHTML = marked.parse(html);
-            aiMsg.appendChild(answerDiv);
-            
-            body.appendChild(aiMsg);
-            body.scrollTop = body.scrollHeight;
+            eventSource.onerror = function() {
+                eventSource.close();
+                aiMsg.classList.remove('streaming');
+            };
         } catch (e) {
-            body.removeChild(typing);
-            console.error("AI Error:", e);
+            console.error(e);
+            aiMsg.classList.remove('streaming');
         }
+    }
+
+    document.getElementById('sendQuestionBtn').addEventListener('click', sendQuestion);
+    document.getElementById('aiQuestionInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') sendQuestion(); });
+
+    function toggleAIChat() {
+        const card = document.getElementById('aiChatCard');
+        card.style.display = (card.style.display === 'block') ? 'none' : 'block';
     }
 
     // Grounded Citations Logic

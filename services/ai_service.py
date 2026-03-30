@@ -27,94 +27,71 @@ client = OpenAI(
 import re
 
 def summarize_text(text):
-    """Generates a concise summary of the provided text with citations."""
+    """Generates a concise summary of the provided text with a grounded prompt (no RAG)."""
     if not text:
-        return {"summary": "No content to summarize.", "citations": []}
+        return {"summary": ["No content to summarize."], "insight": ""}
     
-    # 1. Chunk the blog context for grounded citations (alphabetical labels, NO numbers)
-    context_chunks = chunk_text(text)
-    
-    # Prefix chunks with alphabetical letters to give structure without index numbers
-    import string
-    alphabet = string.ascii_uppercase
-    labeled_chunks = []
-    for i, c in enumerate(context_chunks):
-        label = alphabet[i % 26] if i < 26 else f"{alphabet[(i//26)-1]}{alphabet[i%26]}"
-        labeled_chunks.append(f"Chunk {label}:\n{c}")
-    chunked_context_str = "\n\n".join(labeled_chunks)
-    
-    max_chunk_id = len(context_chunks)
-
     system_prompt = (
-        "You are a helpful assistant.\n"
-        "Read the blog content and generate a meaningful summary.\n"
-        "Format your answer with exactly 3-5 concise bullet points. Avoid long paragraphs.\n"
-        "Provide one KEY INSIGHT (1-2 sentences max) that interprets the broader meaning, rather than simply repeating the summary.\n"
-        "Do NOT return 'No response generated'."
+        "You are a precise content analyst. Your only source of truth is the article text provided below.\n"
+        "Do NOT use any outside knowledge. Do NOT reference other articles or the web.\n"
+        "If something is not stated in the article, do not include it."
     )
 
-    raw_answer = None
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"--- BLOG ARTICLE SECTIONS ---\n{chunked_context_str}"}
-    ]
+    user_content = (
+        "Analyze ONLY the following article and produce:\n"
+        "1. A 3–5 point executive summary (each point: one clear sentence, grounded in a specific claim from the article)\n"
+        "2. A \"Key Insight\" (1–2 sentences): What is the ONE non-obvious takeaway a reader should remember?\n\n"
+        "Article:\n"
+        "\"\"\"\n"
+        f"{text}\n"
+        "\"\"\"\n\n"
+        "Return your response in this exact JSON format:\n"
+        "{\n"
+        "  \"summary_points\": [\"point 1\", \"point 2\", \"point 3\"],\n"
+        "  \"key_insight\": \"insight here\"\n"
+        "}\n"
+        "Return ONLY the JSON. No preamble, no markdown fences."
+    )
 
     try:
-        for attempt in range(2):
-            completion = client.chat.completions.create(
-                model=AI_MODEL,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=800
-            )
-            raw_answer = completion.choices[0].message.content
-            
-            if raw_answer and "No response generated" not in raw_answer.strip():
-                break
-                
-            print(f"LLM failed on attempt {attempt+1}. Retrying...", flush=True)
-            messages[0] = {"role": "system", "content": "Summarize this text in one paragraph. Do not refuse."}
-            
-        if not raw_answer or "No response generated" in raw_answer:
-            fallback_text = context_chunks[0][:150].strip() + ("..." if len(context_chunks[0]) > 150 else "")
-            raw_answer = f"### SUMMARY\n• Summary based on introduction: {fallback_text}\n\n### KEY INSIGHT\nAutomated extraction due to AI timeout."
-            
-        print("RAW LLM RESPONSE:", raw_answer, flush=True)
-
-        # Strip any rogue citations if the LLM hallucinated them despite the prompt
-        raw_answer = re.sub(r'\[\d+(-\d+)?\]', '', raw_answer)
+        completion = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            temperature=0.1,
+            max_tokens=800
+        )
+        raw_answer = completion.choices[0].message.content
         
-        # Map sentences to citations safely (using the full raw_answer to get all points)
-        raw_answer_cited, display_citations, citation_mapping = _map_citations_to_text(raw_answer, context_chunks)
-        
-        parsed_summary, parsed_insight = _parse_llm_response(raw_answer_cited)
-        
-        if not context_chunks:
+        import json
+        json_match = re.search(r'\{.*\}', raw_answer, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
             return {
-                "summary": parsed_summary,
-                "insight": parsed_insight,
-                "sources": [],
+                "summary": data.get("summary_points", []),
+                "insight": data.get("key_insight", ""),
+                "sources": [], 
                 "internet_sources": [],
                 "citation_mapping": {}
             }
         
-        # Build Sources Array
-        sources_data = []
-        for display_num in display_citations:
-            actual_num = citation_mapping[str(display_num)]
-            excerpt = context_chunks[actual_num-1][:100].strip() + ("..." if len(context_chunks[actual_num-1]) > 100 else "")
-            sources_data.append({
-                "display_id": display_num,
-                "text": excerpt,
-                "internal_id": actual_num
-            })
-
         return {
-            "summary": parsed_summary,
-            "insight": parsed_insight,
-            "sources": sources_data,
+            "summary": [raw_answer.strip()],
+            "insight": "",
+            "sources": [],
             "internet_sources": [],
-            "citation_mapping": citation_mapping
+            "citation_mapping": {}
+        }
+    except Exception as e:
+        print(f"Error in summarize_text: {e}")
+        return {
+            "summary": ["Failed to generate summary."], 
+            "insight": str(e), 
+            "sources": [], 
+            "internet_sources": [],
+            "citation_mapping": {}
         }
     except Exception as e:
         print(f"Error in summarize_text: {e}")
@@ -383,8 +360,8 @@ def answer_question(context, question):
             "citation_mapping": {}
         }
 
-def research_topic(topic):
-    """Uses Tavily to search the web and the LLM to summarize findings."""
+def research_topic(topic, draft_context=""):
+    """Extracts specific 'writing ammunition' from web research results."""
     if not TAVILY_API_KEY:
         return {"error": "Tavily API key not configured."}
 
@@ -401,34 +378,62 @@ def research_topic(topic):
         search_results = response.json().get("results", [])
 
         if not search_results:
-            return {"summary": "No research results found.", "sources": []}
+            return {"ammunition": [], "summary": "No research results found."}
 
         # 2. Prepare context for LLM
-        sources_text = ""
-        sources_list = []
-        seen_urls = set()
-        
+        tavily_results_concatenated = ""
         for result in search_results:
-            if result['url'] not in seen_urls:
-                sources_text += f"Snippet from {result['url']}: {result['content']}\n\n"
-                sources_list.append({"title": result['title'], "url": result['url']})
-                seen_urls.add(result['url'])
+            tavily_results_concatenated += f"Source: {result['url']}\nContent: {result['content']}\n\n"
 
-        # 3. Summarize with LLM
+        # 3. LLM Prompt
+        system_prompt = (
+            "You are a writing research assistant helping an author who is actively drafting a blog post.\n"
+            "Your job is NOT to summarize web articles. Your job is to extract raw material that the author can USE.\n"
+            "Think like a journalist pulling quotes and data for a story they are writing."
+        )
+
+        user_content = (
+            f"The author is writing about: \"{topic}\"\n"
+            f"Their current draft context: \"{draft_context[:500]}\"\n\n"
+            "Here are web research results:\n"
+            "\"\"\"\n"
+            f"{tavily_results_concatenated}\n"
+            "\"\"\"\n\n"
+            "Extract exactly 4–6 \"writing ammunition\" items from these sources.\n"
+            "Each item must be:\n"
+            "- A specific fact, statistic, named expert opinion, or concrete example\n"
+            "- Something that ADDS to the author's argument, not something that repeats the topic generally\n"
+            "- Directly usable as a sentence or paragraph in a blog post\n\n"
+            "Return ONLY a JSON array in this format:\n"
+            "[\n"
+            "  {\n"
+            "    \"fact\": \"The specific claim or data point\",\n"
+            "    \"source\": \"Source name or URL\",\n"
+            "    \"suggested_use\": \"One sentence on how the author could work this into their draft\"\n"
+            "  }\n"
+            "]\n"
+            "No preamble. No markdown. JSON only."
+        )
+
         completion = client.chat.completions.create(
             model=AI_MODEL,
             messages=[
-                {"role": "system", "content": "You are an AI research assistant. Summarize the research findings concisely for a writer."},
-                {"role": "user", "content": f"Topic: {topic}\n\nSearch Results:\n{sources_text}\n\nPlease summarize these findings."}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
             ],
             temperature=0.7,
-            max_tokens=800
+            max_tokens=1024
         )
         
-        return {
-            "summary": completion.choices[0].message.content,
-            "sources": sources_list
-        }
+        raw_answer = completion.choices[0].message.content
+        
+        import json
+        json_match = re.search(r'\[.*\]', raw_answer, re.DOTALL)
+        if json_match:
+            ammunition = json.loads(json_match.group())
+            return {"ammunition": ammunition}
+            
+        return {"error": "Failed to parse writing ammunition."}
     except Exception as e:
         print(f"Error in research_topic: {e}")
         return {"error": "Research failed."}
@@ -469,7 +474,7 @@ import json
 from datetime import datetime
 
 def improve_draft(draft_text):
-    """Suggests improvements for a draft using AI and successfully bypasses unsafe string parsing by wrapping text."""
+    """Suggests improvements for a draft using AI."""
     if not draft_text or not draft_text.strip():
         return {"error": "Draft is empty."}
         
@@ -492,21 +497,43 @@ def improve_draft(draft_text):
         
         content = completion.choices[0].message.content.strip()
         
-        # Strip potential rogue markdown formatting inserted by AI
-        if content.startswith("```text"):
-            content = content[7:]
+        # Strip potential rogue markdown formatting
         if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
+            content = re.sub(r'^```[a-z]*\n', '', content)
+            content = re.sub(r'\n```$', '', content)
             
-        # Safely wrap textual output without assuming volatile JSON syntax parsing
         return {
-            "improved_text": content.strip(),
-            "changes": ["Grammar, clarity, and structure improved automatically by AI."],
-            "insights": ["Review the new draft carefully to verify tone matches your intention."],
-            "sources": []
+            "improved_text": content.strip()
         }
     except Exception as e:
         print(f"Error in improve_draft: {e}", flush=True)
-        return {"error": "Failed to improve draft. Ensure your input is valid."}
+        return {"error": "Failed to improve draft."}
+
+def stream_answer(context, question):
+    """Streams a grounded answer to a user question using SSE."""
+    if not context or not question:
+        yield "data: [ERROR] Context and question required\n\n"
+        return
+
+    system_prompt = (
+        "You are a helpful assistant. Use the blog content provided to answer the question.\n"
+        "Keep it concise and grounded in the text."
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"--- BLOG CONTENT ---\n{context}\n\nUSER QUESTION: {question}"}
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=messages,
+            temperature=0.7,
+            stream=True
+        )
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                yield f"data: {chunk.choices[0].delta.content}\n\n"
+    except Exception as e:
+        yield f"data: [ERROR] {str(e)}\n\n"

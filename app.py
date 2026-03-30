@@ -1,8 +1,9 @@
 import os
 import math
 import re
+import threading
 from datetime import datetime, timezone, timedelta
-from flask import Flask, render_template, request, redirect, session, url_for, flash, abort, jsonify
+from flask import Flask, render_template, request, redirect, session, url_for, flash, abort, jsonify, make_response
 from flask_pymongo import PyMongo
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, TextAreaField, SubmitField, SelectField
@@ -11,12 +12,95 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 import bleach
 from dotenv import load_dotenv
-
-import threading
 from itsdangerous import URLSafeTimedSerializer as Serializer
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-# ... (rest of imports)
+# Load environment variables
+load_dotenv()
+
+app = Flask(__name__)
+# ... (config follows)
+app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
+app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
+
+# Rate Limiter for Render Free Tier protection
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Content-Security-Policy'] = "default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:;"
+    return response
+
+mongo = PyMongo(app)
+users = mongo.db.users
+posts = mongo.db.posts
+comments = mongo.db.comments
+activities = mongo.db.activities
+reading_sessions = mongo.db.reading_sessions
+reading_history = mongo.db.reading_history
+
+@app.context_processor
+def inject_user():
+    user = None
+    if 'user' in session:
+        user = users.find_one({'username': session['user']})
+    return dict(current_user=user)
+
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Content-Security-Policy'] = "default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:;"
+    return response
+
+@app.route('/sitemap.xml')
+def sitemap():
+    pages = []
+    # Static pages
+    for rule in app.url_map.iter_rules():
+        if "GET" in rule.methods and len(rule.arguments) == 0:
+            pages.append([url_for(rule.endpoint, _external=True), datetime.now().date()])
+
+    # Dynamic posts
+    for post in posts.find({'is_draft': {'$ne': True}}):
+        pages.append([url_for('view_post', post_id=str(post['_id']), _external=True), post.get('updated_at', post.get('created_at', datetime.now())).date()])
+
+    xml_sitemap = render_template('sitemap.xml', pages=pages)
+    response = make_response(xml_sitemap)
+    response.headers["Content-Type"] = "application/xml"
+    return response
+
+# Rate Limiter for Render Free Tier protection
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
 from services import ai_service
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+import uuid
+
+# Background executor for slow AI tasks
+executor = ThreadPoolExecutor(max_workers=4)
+# In-memory or MongoDB persistent job status
+jobs = {} 
 
 def send_digest_email(user_email, username, last_visit):
     with app.app_context():
@@ -185,6 +269,10 @@ def get_trending_posts():
 @app.route('/health')
 def health_check():
     return "OK", 200
+
+@app.route('/ping')
+def ping():
+    return {'status': 'ok'}, 200
 
 @app.route('/api/save_progress/<post_id>', methods=['POST'])
 def save_progress(post_id):
@@ -426,13 +514,13 @@ def index():
         all_posts = list(all_posts_cursor)
         total_posts = posts.count_documents(query)
     
-    for post in all_posts:
-        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-        post['read_time'] = get_reading_time(clean_text)
+    # Fetch author avatars for the feed
+    authors_list = list(set(p['author'] for p in all_posts))
+    author_avatars = {u['username']: u.get('avatar_url') for u in users.find({'username': {'$in': authors_list}}, {'username': 1, 'avatar_url': 1})}
         
     total_pages = math.ceil(total_posts / per_page)
     
-    return render_template('index.html', posts=all_posts, page=page, total_pages=total_pages, trending_posts=trending_posts, current_tab=tab)
+    return render_template('index.html', posts=all_posts, page=page, total_pages=total_pages, trending_posts=trending_posts, current_tab=tab, author_avatars=author_avatars)
 
 @app.route('/search')
 def search():
@@ -646,8 +734,8 @@ def view_post(post_id):
     if 'user' in session:
         user = users.find_one({'username': session['user']})
         if user:
-            saved = user.get('saved_posts', [])
-            is_bookmarked = ObjectId(post_id) in saved
+            saved = user.get('bookmarks', [])
+            is_bookmarked = post_id in saved
 
             # Get reading progress
             hist = reading_history.find_one({'user': session['user'], 'post_id': ObjectId(post_id)})
@@ -702,13 +790,13 @@ def bookmark_post(post_id):
         return redirect(url_for('login'))
         
     user = users.find_one({'username': session['user']})
-    saved = user.get('saved_posts', [])
+    saved = user.get('bookmarks', [])
     
-    if ObjectId(post_id) in saved:
-        users.update_one({'username': session['user']}, {'$pull': {'saved_posts': ObjectId(post_id)}})
+    if post_id in saved:
+        users.update_one({'username': session['user']}, {'$pull': {'bookmarks': post_id}})
         flash('Removed from reading list.', 'info')
     else:
-        users.update_one({'username': session['user']}, {'$addToSet': {'saved_posts': ObjectId(post_id)}})
+        users.update_one({'username': session['user']}, {'$addToSet': {'bookmarks': post_id}})
         flash('Added to reading list.', 'success')
         
     return redirect(url_for('view_post', post_id=post_id))
@@ -720,69 +808,103 @@ def ai_summarize(post_id):
         post = posts.find_one({'_id': ObjectId(post_id)})
         if not post:
             return jsonify({'error': 'Post not found'}), 404
-        import re
-        raw_content = post.get('content', '')
-        spaced_content = re.sub(r'<(p|br|div|h[1-6])[^>]*>', '\n', raw_content, flags=re.IGNORECASE)
-        clean_text = bleach.clean(spaced_content, tags=[], strip=True)
-        result = ai_service.summarize_text(clean_text)
+            
+        # 1. Check Cache
+        if 'summary_cache' in post:
+            cache_data = post['summary_cache']
+            # Only use cache if it was generated after the last update
+            updated_at = post.get('updated_at', post.get('created_at'))
+            if cache_data.get('generated_at') and cache_data['generated_at'] >= updated_at:
+                return jsonify(cache_data)
+
+        # 2. Extract Full Text with BeautifulSoup
+        soup = BeautifulSoup(post.get('content', ''), 'html.parser')
+        # Preserve paragraph breaks
+        for p in soup.find_all('p'):
+            p.append('\n\n')
+        full_text = soup.get_text().strip()
+
+        # 3. Call AI
+        result = ai_service.summarize_text(full_text)
         
-        # Ensure result is safely returned even if structure varies
+        # 4. Save to Cache
         if isinstance(result, dict) and 'summary' in result:
+            result['generated_at'] = datetime.now(timezone.utc)
+            posts.update_one({'_id': ObjectId(post_id)}, {'$set': {'summary_cache': result}})
             return jsonify(result)
         else:
-            # Fallback
-            return jsonify({"summary": [str(result)], "insight": "No specific insight provided.", "sources": [], "internet_sources": [], "citation_mapping": {}})
+            return jsonify({"summary": ["Failed to extract summary."], "insight": ""}), 500
             
     except Exception as e:
         print(f"AI SUMMARIZE ERROR: {e}", flush=True)
-        return jsonify({"summary": ["An error occurred while linking to the AI. Please try again later."], "insight": "An error occurred.", "sources": [], "internet_sources": [], "citation_mapping": {}}), 500
+        return jsonify({"summary": ["An error occurred."], "insight": ""}), 500
 
 @app.route('/ai/ask/<post_id>', methods=['POST'])
 def ai_ask(post_id):
-    # Public route: removed 'user' in session check
-    try:
-        data = request.get_json()
-        question = data.get('question')
-        if not question:
-            return {'error': 'Question is required'}, 400
-            
-        post = posts.find_one({'_id': ObjectId(post_id)})
-        if not post:
-            return jsonify({'error': 'Post not found'}), 404
-            
-        import re
-        raw_content = post.get('content', '')
-        spaced_content = re.sub(r'<(p|br|div|h[1-6])[^>]*>', '\n', raw_content, flags=re.IGNORECASE)
-        clean_text = bleach.clean(spaced_content, tags=[], strip=True)
-        
-        result = ai_service.answer_question(clean_text, question)
-        
-        if isinstance(result, dict) and 'summary' in result:
-            return jsonify(result)
-        else:
-            return jsonify({"summary": [str(result)], "insight": "No specific insight provided.", "sources": [], "internet_sources": [], "citation_mapping": {}})
-            
-    except Exception as e:
-        print(f"AI ASK ERROR: {e}", flush=True)
-        return jsonify({"summary": ["An error occurred while linking to the AI."], "insight": "An error occurred.", "sources": [], "internet_sources": [], "citation_mapping": {}}), 500
+    # This route is now a fallback for non-streaming clients or 
+    # could be deprecated in favor of /api/chat/stream
+    return jsonify({"error": "Please use the streaming endpoint /api/chat/stream/<post_id>"}), 400
+
+@app.route('/api/chat/stream/<post_id>')
+def ai_chat_stream(post_id):
+    question = request.args.get('question')
+    if not question:
+        return "data: [ERROR] Question required\n\n", 400
+    
+    post = posts.find_one({'_id': ObjectId(post_id)})
+    if not post:
+        return "data: [ERROR] Post not found\n\n", 404
+
+    soup = BeautifulSoup(post.get('content', ''), 'html.parser')
+    clean_text = soup.get_text()
+
+    from flask import Response
+    return Response(ai_service.stream_answer(clean_text, question), mimetype='text/event-stream')
 
 @app.route('/ai/research', methods=['POST'])
 def ai_research():
-    # Protected route: only authors research in editor
     if 'user' not in session:
         return {'error': 'Unauthorized'}, 401
     
-    try:
-        data = request.get_json()
-        topic = data.get('topic')
-        if not topic:
-            return {'error': 'Topic is required'}, 400
-            
-        result = ai_service.research_topic(topic)
-        return result
-    except Exception as e:
-        print(f"AI RESEARCH ERROR: {e}", flush=True)
-        return {'error': str(e)}, 500
+    data = request.get_json()
+    topic = data.get('topic')
+    draft = data.get('draft', '')
+    
+    if not topic:
+        return {'error': 'Topic required'}, 400
+    
+    job_id = str(uuid.uuid4())
+    # TTL Index in MongoDB handles cleanup
+    mongo.db.jobs.insert_one({
+        'job_id': job_id,
+        'status': 'pending',
+        'created_at': datetime.now(timezone.utc)
+    })
+
+    def run_job(j_id, t, d):
+        try:
+            res = ai_service.research_topic(t, d)
+            mongo.db.jobs.update_one({'job_id': j_id}, {
+                '$set': {'status': 'completed', 'result': res}
+            })
+        except Exception as e:
+            mongo.db.jobs.update_one({'job_id': j_id}, {
+                '$set': {'status': 'failed', 'error': str(e)}
+            })
+
+    executor.submit(run_job, job_id, topic, draft)
+    return jsonify({'job_id': job_id})
+
+@app.route('/api/job/<job_id>')
+def get_job_status(job_id):
+    job = mongo.db.jobs.find_one({'job_id': job_id})
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify({
+        'status': job['status'],
+        'result': job.get('result'),
+        'error': job.get('error')
+    })
 
 @app.route('/ai/improve-draft', methods=['POST'])
 def ai_improve_draft():
@@ -796,8 +918,12 @@ def ai_improve_draft():
             return {'error': 'Draft is required'}, 400
             
         result = ai_service.improve_draft(draft)
-        return result
+        # Return original for diffing
+        result['original'] = draft
+        return jsonify(result)
     except Exception as e:
+        print(f"AI IMPROVE ERROR: {e}", flush=True)
+        return jsonify({'error': str(e)}), 500
         print(f"AI IMPROVE ERROR: {e}", flush=True)
         return {'error': str(e)}, 500
 
@@ -933,9 +1059,9 @@ def dashboard():
     
     if section == 'saved':
         user = users.find_one({'username': session['user']})
-        saved_ids = user.get('saved_posts', [])
+        saved_ids = user.get('bookmarks', [])
         # Fetch posts that are in the saved list
-        user_posts = list(posts.find({'_id': {'$in': saved_ids}}).sort("created_at", -1))
+        user_posts = list(posts.find({'_id': {'$in': [ObjectId(bid) for bid in saved_ids]}}).sort("created_at", -1))
     elif section == 'drafts':
         user_posts = list(posts.find({'author': session['user'], 'is_draft': True}).sort("updated_at", -1))
     else:
@@ -950,12 +1076,21 @@ def profile(username):
     if not user:
         abort(404)
         
-    user_posts = list(posts.find({'author': username, 'is_draft': {'$ne': True}}).sort("created_at", -1))
+    user_posts_cursor = posts.find({'author': username, 'is_draft': {'$ne': True}}).sort("created_at", -1)
+    user_posts = list(user_posts_cursor)
+    
+    # Calculate stats
+    total_likes = sum(len([r for r in p.get('reactions', {}).values() if r == 'like']) for p in user_posts)
+    total_stories = len(user_posts)
+    
+    for post in user_posts:
+        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+        post['read_time'] = get_reading_time(clean_text)
     
     # Fetch recent activities
     user_activities = list(activities.find({'user': username}).sort("timestamp", -1).limit(10))
     
-    return render_template('profile.html', user=user, posts=user_posts, activities=user_activities)
+    return render_template('profile.html', user=user, posts=user_posts, activities=user_activities, total_likes=total_likes, total_stories=total_stories)
 
 @app.route('/settings')
 def settings():
@@ -1004,6 +1139,42 @@ def settings_account():
         form.email.data = user.get('email', '')
         
     return render_template('settings_account.html', form=form)
+
+@app.route('/api/bookmark/<post_id>', methods=['POST'])
+@limiter.limit("10 per minute")
+def toggle_bookmark(post_id):
+    if 'user' not in session:
+        return jsonify({'error': 'Login required'}), 401
+    
+    user = users.find_one({'username': session['user']})
+    bookmarks = user.get('bookmarks', [])
+    
+    if post_id in bookmarks:
+        users.update_one({'username': session['user']}, {'$pull': {'bookmarks': post_id}})
+        return jsonify({'status': 'removed'})
+    else:
+        users.update_one({'username': session['user']}, {'$addToSet': {'bookmarks': post_id}})
+        return jsonify({'status': 'added'})
+
+@app.route('/reading-list')
+def reading_list():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+        
+    user = users.find_one({'username': session['user']})
+    bookmark_ids = user.get('bookmarks', [])
+    
+    bookmarked_posts = []
+    if bookmark_ids:
+        # Convert string IDs to ObjectIDs
+        obj_ids = [ObjectId(bid) for bid in bookmark_ids]
+        bookmarked_posts = list(posts.find({'_id': {'$in': obj_ids}, 'is_draft': {'$ne': True}}))
+        
+        for post in bookmarked_posts:
+            clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+            post['read_time'] = get_reading_time(clean_text)
+            
+    return render_template('reading_list.html', posts=bookmarked_posts)
 
 if __name__ == '__main__':
     app.run(debug=True)

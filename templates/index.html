@@ -32,37 +32,47 @@
             {% for post in posts %}
                 <div class="card border-0 mb-5 card-hover" data-aos="fade-up">
                     <div class="card-body p-0">
-                        <div class="d-flex align-items-center mb-3">
-                            <img src="https://ui-avatars.com/api/?name={{ post.author }}&background=random" 
+                        <!-- Author Row -->
+                        <div class="d-flex align-items-center mb-2">
+                            <img src="{{ author_avatars.get(post.author) or 'https://ui-avatars.com/api/?name=' + post.author }}" 
                                  class="rounded-circle me-2" width="24" height="24" alt="{{ post.author }}">
-                            <a href="{{ url_for('profile', username=post.author) }}" class="text-dark text-decoration-none fw-bold small me-2">{{ post.author }}</a>
-                            <span class="text-muted small">{{ post.created_at.strftime('%b %d') if post.created_at else '' }}</span>
+                            <a href="{{ url_for('profile', username=post.author) }}" class="text-dark text-decoration-none fw-bold small me-1">{{ post.author }}</a>
+                            <span class="text-muted small">· {{ post.created_at.strftime('%b %d') if post.created_at else '' }}</span>
                         </div>
 
-                        <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
-                            <div class="row flex-row-reverse flex-md-row">
-                                <div class="col-md-8">
-                                    <h2 class="fw-bold mb-1 h3">{{ post.title }}</h2>
-                                    <h5 class="text-muted fw-normal mb-2 small">{{ post.subtitle or post.content|striptags|truncate(100) }}</h5>
-                                </div>
-                                <div class="col-md-4 mb-3 mb-md-0">
-                                    {% if post.cover_url %}
-                                        <img src="{{ post.cover_url }}" class="img-fluid rounded" style="height: 100px; width: 100%; object-fit: cover;" alt="Cover">
-                                    {% else %}
-                                        <div class="rounded w-100" style="height: 100px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);"></div>
+                        <!-- Main Content Row -->
+                        <div class="row align-items-start">
+                            <div class="col-8 col-md-9">
+                                <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
+                                    <h2 class="fw-bold mb-1 h4 h3-md">{{ post.title }}</h2>
+                                    <p class="text-muted fw-normal mb-2 d-none d-md-block" style="font-size: 1rem; line-height: 1.4;">
+                                        {{ post.subtitle or post.content|striptags|truncate(120) }}
+                                    </p>
+                                </a>
+                                
+                                <div class="d-flex align-items-center mt-3 text-muted small">
+                                    {% if post.tags %}
+                                        <span class="badge bg-light text-dark rounded-pill me-2 px-2 py-1 fw-normal">{{ post.tags[0] }}</span>
                                     {% endif %}
+                                    <span>{{ post.read_time }} min read</span>
+                                    <span class="mx-2">·</span>
+                                    <span><i class="bi bi-hand-thumbs-up"></i> {{ post.likes|default([])|length }}</span>
+                                    
+                                    <div class="ms-auto">
+                                        <button class="btn btn-link text-muted p-0 bookmark-btn" data-id="{{ post._id }}" title="Save for later">
+                                            <i class="bi bi-bookmark"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </a>
-                        
-                        <div class="d-flex align-items-center mt-3">
-                            <span class="badge bg-light text-secondary rounded-pill me-3 fw-normal">{{ post.read_time }} min read</span>
-                            {% for tag in (post.tags|default([]))[:3] %}
-                                 <span class="badge bg-light text-secondary rounded-pill me-1 fw-normal">{{ tag }}</span>
-                            {% endfor %}
-                            
-                            <div class="ms-auto text-muted small">
-                                <i class="bi bi-hand-thumbs-up"></i> {{ post.likes|default([])|length }}
+                            <div class="col-4 col-md-3">
+                                <a href="{{ url_for('view_post', post_id=post._id) }}">
+                                    {% if post.cover_url %}
+                                        <div class="rounded shadow-sm" style="height: 100px; width: 100%; background: url('{{ post.cover_url }}') center/cover no-repeat;"></div>
+                                    {% else %}
+                                        <div class="rounded" style="height: 100px; width: 100%; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);"></div>
+                                    {% endif %}
+                                </a>
                             </div>
                         </div>
                     </div>

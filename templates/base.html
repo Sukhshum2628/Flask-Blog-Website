@@ -67,40 +67,63 @@
             width: 100%;
             height: 200px;
         }
+        /* Bookmark Animation */
+        .bookmark-btn i {
+            transition: transform 0.2s, color 0.2s;
+        }
+        .bookmark-btn:hover i {
+            transform: scale(1.2);
+            color: #000;
+        }
+        .bookmark-btn.active i {
+            color: #198754;
+        }
+        .bookmark-btn.active i::before {
+            content: "\f199"; /* bi-bookmark-fill */
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg sticky-top">
+    <nav class="navbar navbar-expand-lg sticky-top bg-white">
         <div class="container">
             <a class="navbar-brand" href="/">FlaskBlog</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <!-- Search Form -->
-                <form class="d-flex mx-auto" action="{{ url_for('search') }}" method="GET">
-                    <div class="input-group">
-                        <span class="input-group-text bg-light border-0"><i class="bi bi-search"></i></span>
-                        <input class="form-control bg-light border-0" type="search" name="q" placeholder="Search" aria-label="Search" value="{{ request.args.get('q', '') }}">
-                    </div>
+            
+            <div class="d-none d-md-block flex-grow-1 mx-4">
+                <form action="{{ url_for('search') }}" method="GET" class="position-relative">
+                    <input class="form-control bg-light border-0 rounded-pill ps-4 py-2" type="search" name="q" placeholder="Search stories..." style="font-size: 0.9rem;">
+                    <i class="bi bi-search position-absolute end-0 top-50 translate-middle-y me-3 text-muted"></i>
                 </form>
+            </div>
 
+            <button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <i class="bi bi-list fs-2"></i>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto align-items-center">
                     {% if session.user %}
-                        <li class="nav-item me-3">
-                            <a class="nav-link" href="{{ url_for('new_post') }}"><i class="bi bi-pencil-square"></i> Write</a>
+                        <li class="nav-item me-md-4">
+                            <a class="nav-link d-flex align-items-center" href="{{ url_for('new_post') }}">
+                                <i class="bi bi-pencil-square me-2 fs-5"></i> 
+                                <span>Write</span>
+                            </a>
+                        </li>
+                        <li class="nav-item me-md-4">
+                            <a class="nav-link" href="{{ url_for('reading_list') }}" title="Reading List">
+                                <i class="bi bi-bookmarks fs-5"></i>
+                            </a>
                         </li>
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" role="button" data-bs-toggle="dropdown">
-                                <img src="{{ current_user.avatar_url or 'https://ui-avatars.com/api/?name=' + session.user }}" class="rounded-circle" width="32" height="32" alt="User">
+                            <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" data-bs-toggle="dropdown">
+                                <img src="{{ current_user.avatar_url or 'https://ui-avatars.com/api/?name=' + session.user }}" class="rounded-circle shadow-sm" width="32" height="32">
                             </a>
-                            <ul class="dropdown-menu dropdown-menu-end border-0 shadow">
-                                <li><a class="dropdown-item" href="{{ url_for('profile', username=session.user) }}">Profile</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('dashboard') }}">Library</a></li>
-                                <li><a class="dropdown-item" href="{{ url_for('settings') }}">Settings</a></li>
+                            <ul class="dropdown-menu dropdown-menu-end border-0 shadow-sm mt-2">
+                                <li><a class="dropdown-item py-2" href="{{ url_for('profile', username=session.user) }}">Profile</a></li>
+                                <li><a class="dropdown-item py-2" href="{{ url_for('dashboard') }}">Library</a></li>
+                                <li><a class="dropdown-item py-2" href="{{ url_for('settings') }}">Settings</a></li>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}">Sign out</a></li>
+                                <li><a class="dropdown-item py-2 text-danger" href="{{ url_for('logout') }}">Sign out</a></li>
                             </ul>
                         </li>
                     {% else %}
@@ -108,7 +131,7 @@
                             <a class="nav-link" href="{{ url_for('login') }}">Sign in</a>
                         </li>
                         <li class="nav-item">
-                            <a class="btn btn-black" href="{{ url_for('register') }}">Get started</a>
+                            <a class="btn btn-black px-4" href="{{ url_for('register') }}">Get started</a>
                         </li>
                     {% endif %}
                 </ul>
@@ -140,22 +163,27 @@
             offset: 100
         });
 
-        // Click debounce for post links
-        document.addEventListener('click', function(e) {
-            const link = e.target.closest('a');
-            if (!link) return;
-
-            const href = link.getAttribute('href');
-            if (href && href.includes('/post/') && !href.includes('/new') && !href.includes('bookmark')) {
-                // Visually and functionally disable link
-                link.style.pointerEvents = 'none';
-                link.style.opacity = '0.5';
-
-                // Re-enable after 3 seconds in case navigation fails or user uses Back button
-                setTimeout(() => {
-                    link.style.pointerEvents = 'auto';
-                    link.style.opacity = '1';
-                }, 3000);
+        // AJAX Bookmark Interaction
+        document.addEventListener('click', async function(e) {
+            const btn = e.target.closest('.bookmark-btn');
+            if (!btn) return;
+            
+            e.preventDefault();
+            const postId = btn.dataset.id;
+            
+            try {
+                const response = await fetch(`/api/bookmark/${postId}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.status === 'added') {
+                    btn.classList.add('active');
+                } else if (data.status === 'removed') {
+                    btn.classList.remove('active');
+                } else if (data.error) {
+                    window.location.href = "{{ url_for('login') }}";
+                }
+            } catch (err) {
+                console.error("Bookmark error:", err);
             }
         });
     </script>

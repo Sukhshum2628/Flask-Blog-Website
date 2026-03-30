@@ -13,3 +13,5 @@ Flask-Caching
 Flask-Compress
 Flask-Login
 tavily-python
+flask-limiter
+beautifulsoup4

@@ -3,13 +3,26 @@
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-8">
-        <div class="text-center mb-5">
+        <div class="mb-5 text-center">
             <img src="{{ user.avatar_url or 'https://ui-avatars.com/api/?name=' + user.username }}" 
-                 class="rounded-circle mb-3 shadow-sm" width="100" height="100" alt="{{ user.username }}">
-            <h2 class="fw-bold">{{ user.username }}</h2>
-            <p class="text-muted">{{ user.bio }}</p>
+                 class="rounded-circle mb-3 shadow-sm border p-1" width="128" height="128" alt="{{ user.username }}">
+            <h1 class="fw-bold h2 mb-1">{{ user.username }}</h1>
+            <p class="text-muted mb-3">{{ user.bio or "No bio available." }}</p>
+            
+            <div class="d-flex justify-content-center align-items-center mb-4 small text-muted text-uppercase fw-bold" style="letter-spacing: 1px;">
+                <div class="px-3 border-end">
+                    <span class="text-dark">{{ total_stories }}</span> Stories
+                </div>
+                <div class="px-3 border-end">
+                    <span class="text-dark">{{ total_likes }}</span> Likes
+                </div>
+                <div class="px-3">
+                    Since <span class="text-dark">{{ user.joined_at.strftime('%Y') if user.joined_at else '2024' }}</span>
+                </div>
+            </div>
+
             {% if session.user == user.username %}
-                <a href="{{ url_for('settings') }}" class="btn btn-outline-dark btn-sm rounded-pill px-3">Edit Profile</a>
+                <a href="{{ url_for('settings') }}" class="btn btn-outline-dark btn-sm rounded-pill px-4">Edit Profile</a>
             {% endif %}
         </div>
 
@@ -26,15 +39,34 @@
             <div class="tab-pane fade show active" id="stories">
                 {% if posts %}
                     {% for post in posts %}
-                        <div class="card border-0 mb-4 pb-4 border-bottom">
+                        <div class="card border-0 mb-5 card-hover">
                             <div class="card-body p-0">
-                                <div class="text-muted small mb-2">{{ post.created_at.strftime('%b %d, %Y') }}</div>
-                                <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
-                                    <h3 class="fw-bold h4 mb-2">{{ post.title }}</h3>
-                                    <p class="text-muted mb-0">{{ post.subtitle or post.content|striptags|truncate(150) }}</p>
-                                </a>
-                                <div class="mt-3">
-                                    <span class="small text-muted">{{ post.read_time }} min read</span>
+                                <div class="row align-items-start">
+                                    <div class="col-8 col-md-9">
+                                        <a href="{{ url_for('view_post', post_id=post._id) }}" class="text-decoration-none text-dark">
+                                            <h2 class="fw-bold mb-1 h4">{{ post.title }}</h2>
+                                            <p class="text-muted small d-none d-md-block">{{ post.subtitle or post.content|striptags|truncate(120) }}</p>
+                                        </a>
+                                        <div class="d-flex align-items-center mt-3 text-muted small">
+                                            <span>{{ post.created_at.strftime('%b %d') }}</span>
+                                            <span class="mx-2">·</span>
+                                            <span>{{ post.read_time }} min read</span>
+                                            <div class="ms-auto">
+                                                <button class="btn btn-link text-muted p-0 bookmark-btn" data-id="{{ post._id }}">
+                                                    <i class="bi bi-bookmark"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4 col-md-3">
+                                        <a href="{{ url_for('view_post', post_id=post._id) }}">
+                                            {% if post.cover_url %}
+                                                <div class="rounded shadow-sm" style="height: 100px; width: 100%; background: url('{{ post.cover_url }}') center/cover no-repeat;"></div>
+                                            {% else %}
+                                                <div class="rounded" style="height: 100px; width: 100%; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);"></div>
+                                            {% endif %}
+                                        </a>
+                                    </div>
                                 </div>
                             </div>
                         </div>

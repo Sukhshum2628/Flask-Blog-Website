@@ -53,6 +53,19 @@
         position: relative;
         font-family: 'Fira Code', monospace;
     }
+    /* Skeleton Loader */
+    .skeleton-line {
+        height: 12px;
+        background: #e9ecef;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        animation: pulse-bg 1.5s infinite ease-in-out;
+    }
+    @keyframes pulse-bg {
+        0% { background-color: #f0f0f0; }
+        50% { background-color: #e0e0e0; }
+        100% { background-color: #f0f0f0; }
+    }
 </style>
 {% endblock %}
 
@@ -353,9 +366,6 @@
         }
 
         if (startPos > 100) {
-            window.scrollTo({
-                top: startPos,
-                behavior: 'smooth'
             window.scrollTo({ top: startPos, behavior: 'smooth' });
             const toastEl = document.getElementById('progressToast');
             const toast = new bootstrap.Toast(toastEl);
@@ -369,8 +379,16 @@
         const area = document.getElementById('aiSummaryArea');
         const content = document.getElementById('aiSummaryContent');
         
+        // Show Skeleton Loader
+        area.classList.remove('d-none');
+        content.innerHTML = `
+            <div class="skeleton-line w-100"></div>
+            <div class="skeleton-line w-75"></div>
+            <div class="skeleton-line w-50"></div>
+        `;
+        
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Analyzing...';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Summarizing...';
         
         try {
             const response = await fetch(`/ai/summarize/${postId}`, { method: 'POST' });

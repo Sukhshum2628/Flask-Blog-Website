@@ -17,7 +17,7 @@
                     <span class="text-dark">{{ total_likes }}</span> Likes
                 </div>
                 <div class="px-3">
-                    Since <span class="text-dark">{{ user.joined_at.strftime('%Y') if user.joined_at else '2024' }}</span>
+                    Since <span class="text-dark">{{ user.joined_at.strftime('%Y') if user.joined_at else 'Early' }}</span>
                 </div>
             </div>
 

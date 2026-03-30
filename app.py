@@ -131,13 +131,6 @@ def send_digest_email(user_email, username, last_visit):
         # Use Brevo API
         send_email_brevo(user_email, "While you were away...", body)
 
-# Load environment variables
-load_dotenv()
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
-app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
-
 from flask_compress import Compress
 from flask_caching import Cache
 
@@ -145,8 +138,6 @@ compress = Compress(app)
 cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 60})
 
 import requests
-
-# ... (imports)
 
 # Mail Configuration (Removed SMTP, using Resend API)
 # We don't need app.config['MAIL_SERVER'] etc anymore.
@@ -206,8 +197,6 @@ If you did not make this request then simply ignore this email and no changes wi
     # Send in background thread
     threading.Thread(target=send_async_email, args=(app, user['email'], subject, body)).start()
 
-# ... (routes)
-
 @app.route('/test_email')
 def test_email():
     key = os.environ.get('BREVO_API_KEY')
@@ -223,14 +212,6 @@ def test_email():
         return f"Email sent via Brevo to {target_email}! Check logs for details."
     else:
         return "Failed to send email. Check Render logs for Brevo error response."
-
-mongo = PyMongo(app)
-users = mongo.db.users
-posts = mongo.db.posts
-comments = mongo.db.comments
-activities = mongo.db.activities
-reading_sessions = mongo.db.reading_sessions
-reading_history = mongo.db.reading_history
 
 # Global Cache for Trending Posts
 TRENDING_CACHE = {
@@ -514,6 +495,10 @@ def index():
         all_posts = list(all_posts_cursor)
         total_posts = posts.count_documents(query)
     
+    for post in all_posts:
+        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+        post['read_time'] = get_reading_time(clean_text)
+
     # Fetch author avatars for the feed
     authors_list = list(set(p['author'] for p in all_posts))
     author_avatars = {u['username']: u.get('avatar_url') for u in users.find({'username': {'$in': authors_list}}, {'username': 1, 'avatar_url': 1})}

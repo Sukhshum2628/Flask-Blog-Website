@@ -24,23 +24,6 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
 app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
 
-# Rate Limiter for Render Free Tier protection
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://",
-)
-
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    response.headers['Content-Security-Policy'] = "default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:;"
-    return response
-
 mongo = PyMongo(app)
 users = mongo.db.users
 posts = mongo.db.posts
@@ -55,9 +38,6 @@ def inject_user():
     if 'user' in session:
         user = users.find_one({'username': session['user']})
     return dict(current_user=user)
-
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 
 @app.after_request
 def add_security_headers(response):
@@ -97,8 +77,8 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 
-# Background executor for slow AI tasks
-executor = ThreadPoolExecutor(max_workers=4)
+# Background executor for slow AI tasks (throttled for Free Tier)
+executor = ThreadPoolExecutor(max_workers=2)
 # In-memory or MongoDB persistent job status
 jobs = {} 
 

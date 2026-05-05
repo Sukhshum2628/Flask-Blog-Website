@@ -63,6 +63,14 @@ def summarize_text(text):
             temperature=0.1,
             max_tokens=800
         )
+        if not completion.choices:
+            return {
+                "summary": ["The AI model returned no choices."],
+                "insight": "",
+                "sources": [],
+                "internet_sources": [],
+                "citation_mapping": {}
+            }
         raw_answer = completion.choices[0].message.content
         
         import json
@@ -291,6 +299,9 @@ def answer_question(context, question):
                 temperature=0.7,
                 max_tokens=1024
             )
+            if not completion.choices:
+                print("AI ERROR: No choices returned by LLM", flush=True)
+                break
             raw_answer = completion.choices[0].message.content
             
             if raw_answer and "No response generated" not in raw_answer.strip():
@@ -425,6 +436,8 @@ def research_topic(topic, draft_context=""):
             max_tokens=1024
         )
         
+        if not completion.choices:
+             return {"error": "No research content generated."}
         raw_answer = completion.choices[0].message.content
         
         import json
@@ -495,6 +508,8 @@ def improve_draft(draft_text):
             max_tokens=2000
         )
         
+        if not completion.choices:
+            return {"error": "AI returned no improved text."}
         content = completion.choices[0].message.content.strip()
         
         # Strip potential rogue markdown formatting
@@ -533,7 +548,7 @@ def stream_answer(context, question):
             stream=True
         )
         for chunk in response:
-            if chunk.choices[0].delta.content:
+            if chunk.choices and chunk.choices[0].delta.content:
                 yield f"data: {chunk.choices[0].delta.content}\n\n"
     except Exception as e:
         yield f"data: [ERROR] {str(e)}\n\n"

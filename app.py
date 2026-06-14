@@ -374,7 +374,7 @@ class RegisterForm(FlaskForm):
     submit = SubmitField('Sign Up')
 
 class LoginForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired()])
+    username = StringField('Username or Email', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
 
@@ -574,7 +574,16 @@ def register():
 def login():
     form = LoginForm()
     if form.validate_on_submit():
-        user = users.find_one({'username': form.username.data})
+        # Accept either username or email as the login identifier. Email is
+        # matched case-insensitively (emails are not case-sensitive).
+        identifier = (form.username.data or '').strip()
+        email_regex = re.compile('^' + re.escape(identifier) + '$', re.IGNORECASE)
+        user = users.find_one({
+            '$or': [
+                {'username': identifier},
+                {'email': email_regex}
+            ]
+        })
         if user and check_password_hash(user['password'], form.password.data):
             session['user'] = user['username']
             

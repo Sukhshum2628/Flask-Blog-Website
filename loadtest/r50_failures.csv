@@ -1,0 +1,4 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,/?page=[n],HTTPError('429 Client Error: Too Many Requests for url: /?page=[n]'),22,2026-06-14T15:30:31Z,2026-06-14T15:31:05Z
+GET,/sitemap.xml,HTTPError('429 Client Error: Too Many Requests for url: /sitemap.xml'),25,2026-06-14T15:30:08Z,2026-06-14T15:30:10Z
+GET,/ (homepage),HTTPError('429 Client Error: Too Many Requests for url: / (homepage)'),81,2026-06-14T15:30:20Z,2026-06-14T15:31:05Z

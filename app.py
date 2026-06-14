@@ -113,7 +113,11 @@ def sitemap():
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "50 per hour"],
+    # No global default: read pages (homepage, posts, search) must stay
+    # unlimited so users sharing one IP (NAT/corporate/mobile) aren't locked
+    # out. Limits are applied per-route below only to auth, write, and AI
+    # endpoints, which are the abuse/cost-sensitive ones.
+    default_limits=[],
     storage_uri="memory://",
 )
 from services import ai_service
@@ -349,6 +353,19 @@ def get_reading_time(text):
     reading_time_min = math.ceil(word_count / 200) # Avg reading speed 200 wpm
     return reading_time_min
 
+def get_post_read_time(post):
+    """Read time for a post, preferring the value stored at write time.
+
+    New/edited posts persist 'read_time', so list pages no longer need to run
+    bleach over every article body on every request (a hot-path CPU cost). Only
+    legacy docs without the field fall back to computing it on the fly.
+    """
+    stored = post.get('read_time')
+    if stored:
+        return stored
+    clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
+    return get_reading_time(clean_text)
+
 def sanitize_html(content):
     allowed_tags = ['b', 'i', 'u', 'em', 'strong', 'a', 'p', 'h1', 'h2', 'h3', 'br', 'ul', 'ol', 'li', 'blockquote', 'img']
     allowed_attrs = {
@@ -499,6 +516,8 @@ def search_suggestions():
     return {'results': suggestions}
 
 @app.route('/')
+@cache.cached(timeout=30, query_string=True,
+              unless=lambda: 'user' in session)
 def index():
     try:
         page = max(1, int(request.args.get('page', 1)))
@@ -539,8 +558,7 @@ def index():
         total_posts = posts.count_documents(query)
     
     for post in all_posts:
-        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-        post['read_time'] = get_reading_time(clean_text)
+        post['read_time'] = get_post_read_time(post)
 
     # Fetch author avatars for the feed
     authors_list = list(set(p['author'] for p in all_posts))
@@ -562,8 +580,7 @@ def search():
         results = []
     
     for post in results:
-        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-        post['read_time'] = get_reading_time(clean_text)
+        post['read_time'] = get_post_read_time(post)
 
     # Fetch author avatars for search results
     authors_list = list(set(p['author'] for p in results))
@@ -573,6 +590,7 @@ def search():
     return render_template('index.html', posts=results, search_query=query, trending_posts=trending_posts, author_avatars=author_avatars, current_tab='search')
 
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit("10 per hour", methods=["POST"])
 def register():
     form = RegisterForm()
     if form.validate_on_submit():
@@ -602,6 +620,7 @@ def register():
     return render_template('register.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("20 per minute", methods=["POST"])
 def login():
     form = LoginForm()
     if form.validate_on_submit():
@@ -638,6 +657,7 @@ def login():
     return render_template('login.html', form=form)
 
 @app.route('/reset_password', methods=['GET', 'POST'])
+@limiter.limit("5 per hour", methods=["POST"])
 def reset_request():
     if 'user' in session:
         return redirect(url_for('index'))
@@ -673,6 +693,7 @@ def logout():
     return redirect(url_for('index'))
 
 @app.route('/post/new', methods=['GET', 'POST'])
+@limiter.limit("30 per hour", methods=["POST"])
 def new_post():
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -682,9 +703,11 @@ def new_post():
         # Clean HTML content
         clean_content = sanitize_html(form.content.data)
         tags_list = [tag.strip() for tag in form.tags.data.split(',')] if form.tags.data else []
-        
+
         is_draft = form.save_draft.data # True if 'Save Draft' was clicked
-        
+        # Precompute read time once at write time (avoids per-request bleach on feeds)
+        read_time = get_reading_time(bleach.clean(clean_content, tags=[], strip=True))
+
         post_id = posts.insert_one({
             'title': form.title.data,
             'subtitle': form.subtitle.data,
@@ -694,6 +717,7 @@ def new_post():
             'why_wrote': form.why_wrote.data,
             'summary': form.summary.data,
             'content': clean_content,
+            'read_time': read_time,
             'cover_url': form.cover_url.data,
             'author': session['user'],
             'tags': tags_list,
@@ -753,8 +777,7 @@ def view_post(post_id):
         flash('Response added.', 'success')
         return redirect(url_for('view_post', post_id=post_id))
 
-    clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-    read_time = get_reading_time(clean_text)
+    read_time = get_post_read_time(post)
 
     is_author = 'user' in session and session['user'] == post['author']
     
@@ -853,6 +876,7 @@ def bookmark_post(post_id):
 # AI Routes
 @app.route('/ai/summarize/<post_id>', methods=['POST'])
 @csrf.exempt
+@limiter.limit("30 per hour")
 def ai_summarize(post_id):
     try:
         post = posts.find_one({'_id': ObjectId(post_id)})
@@ -897,6 +921,7 @@ def ai_ask(post_id):
     return jsonify({"error": "Please use the streaming endpoint /api/chat/stream/<post_id>"}), 400
 
 @app.route('/api/chat/stream/<post_id>')
+@limiter.limit("60 per hour")
 def ai_chat_stream(post_id):
     question = request.args.get('question')
     if not question:
@@ -914,6 +939,7 @@ def ai_chat_stream(post_id):
 
 @app.route('/ai/research', methods=['POST'])
 @csrf.exempt
+@limiter.limit("20 per hour")
 def ai_research():
     if 'user' not in session:
         return {'error': 'Unauthorized'}, 401
@@ -960,6 +986,7 @@ def get_job_status(job_id):
 
 @app.route('/ai/improve-draft', methods=['POST'])
 @csrf.exempt
+@limiter.limit("30 per hour")
 def ai_improve_draft():
     if 'user' not in session:
         return {'error': 'Unauthorized'}, 401
@@ -979,6 +1006,7 @@ def ai_improve_draft():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/post/<post_id>/edit', methods=['GET', 'POST'])
+@limiter.limit("60 per hour", methods=["POST"])
 def edit_post(post_id):
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -996,7 +1024,9 @@ def edit_post(post_id):
         
         is_draft = form.save_draft.data
         was_draft = post.get('is_draft', False)
-        
+        # Recompute read time on edit so the stored value stays accurate.
+        read_time = get_reading_time(bleach.clean(clean_content, tags=[], strip=True))
+
         posts.update_one({'_id': ObjectId(post_id)}, {'$set': {
             'title': form.title.data,
             'subtitle': form.subtitle.data,
@@ -1006,6 +1036,7 @@ def edit_post(post_id):
             'why_wrote': form.why_wrote.data,
             'summary': form.summary.data,
             'content': clean_content,
+            'read_time': read_time,
             'cover_url': form.cover_url.data,
             'tags': tags_list,
             'is_draft': is_draft,
@@ -1054,6 +1085,7 @@ def delete_post(post_id):
     return redirect(url_for('dashboard'))
 
 @app.route('/post/<post_id>/react/<reaction_type>', methods=['POST'])
+@limiter.limit("60 per minute")
 def react_post(post_id, reaction_type):
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -1080,6 +1112,7 @@ def react_post(post_id, reaction_type):
     return redirect(url_for('view_post', post_id=post_id))
 
 @app.route('/comment/<comment_id>/pin', methods=['POST'])
+@limiter.limit("30 per minute")
 def pin_comment(comment_id):
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -1135,8 +1168,7 @@ def profile(username):
     total_stories = len(user_posts)
     
     for post in user_posts:
-        clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-        post['read_time'] = get_reading_time(clean_text)
+        post['read_time'] = get_post_read_time(post)
     
     # Fetch recent activities
     user_activities = list(activities.find({'user': username}).sort("timestamp", -1).limit(10))
@@ -1223,8 +1255,7 @@ def reading_list():
         bookmarked_posts = list(posts.find({'_id': {'$in': obj_ids}, 'is_draft': {'$ne': True}}))
         
         for post in bookmarked_posts:
-            clean_text = bleach.clean(post.get('content', ''), tags=[], strip=True)
-            post['read_time'] = get_reading_time(clean_text)
+            post['read_time'] = get_post_read_time(post)
             
     return render_template('reading_list.html', posts=bookmarked_posts)
 

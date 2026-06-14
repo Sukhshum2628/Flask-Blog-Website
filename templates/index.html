@@ -1,5 +1,11 @@
 {% extends 'base.html' %}
 
+{% if search_query %}
+{% block title %}Search: {{ search_query }} — FlaskBlog{% endblock %}
+{% block meta_description %}Search results for "{{ search_query }}" on FlaskBlog.{% endblock %}
+{% block robots %}noindex, follow{% endblock %}
+{% endif %}
+
 {% block content %}
 <div class="row">
     <!-- Main Content: Posts -->

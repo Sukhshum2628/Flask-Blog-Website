@@ -76,6 +76,22 @@ def add_security_headers(response):
     )
     return response
 
+@app.route('/robots.txt')
+def robots_txt():
+    lines = [
+        "User-agent: *",
+        "Allow: /",
+        "Disallow: /dashboard",
+        "Disallow: /settings",
+        "Disallow: /reset_password",
+        "Disallow: /api/",
+        "Disallow: /ai/",
+        f"Sitemap: {url_for('sitemap', _external=True)}",
+    ]
+    resp = make_response("\n".join(lines))
+    resp.headers["Content-Type"] = "text/plain"
+    return resp
+
 @app.route('/sitemap.xml')
 def sitemap():
     pages = []
@@ -233,8 +249,11 @@ def get_trending_posts():
     
     # Refresh cache if older than 1 hour (3600 seconds)
     if (now - TRENDING_CACHE['last_updated']).total_seconds() > 3600:
-        # Fetch all posts (Optimization: in a real app, limit to last 30 days)
-        all_posts = list(posts.find({'is_draft': {'$ne': True}}))
+        # Fetch all posts but EXCLUDE the heavy fields (full HTML body + cached
+        # AI summary). Trending only needs counts + card metadata, so pulling
+        # every article body into memory was a needless memory spike on free tier.
+        trending_fields = {'content': 0, 'summary_cache': 0}
+        all_posts = list(posts.find({'is_draft': {'$ne': True}}, trending_fields))
         
         scored_posts = []
         for p in all_posts:
@@ -350,21 +369,33 @@ def verify_reset_token(token, expires_sec=1800):
         return None
     return users.find_one({'_id': ObjectId(user_id)})
 
+def _get_navbar_activity():
+    """Recent-activity feed + site pulse for the navbar, cached ~30s.
+
+    This runs on EVERY request via the context processor; without caching it
+    fired two more DB queries per request (even on health checks/static), which
+    crushes throughput under concurrency. The feed only needs to be near-real-time.
+    """
+    cached = cache.get('navbar_activity')
+    if cached is not None:
+        return cached
+    recent_activities = list(activities.find().sort("timestamp", -1).limit(5))
+    site_pulse = recent_activities[0]['timestamp'] if recent_activities else None
+    result = {'recent_activities': recent_activities, 'site_pulse': site_pulse}
+    cache.set('navbar_activity', result, timeout=30)
+    return result
+
 # Context Processor for User Info in Navbar
 @app.context_processor
 def inject_user():
     current_user = None
     if 'user' in session:
         current_user = users.find_one({'username': session['user']})
-    
-    # Also fetch recent activity and site pulse
-    recent_activities = list(activities.find().sort("timestamp", -1).limit(5))
-    
-    # Site pulse: last activity time
-    last_act = activities.find_one(sort=[("timestamp", -1)])
-    site_pulse = last_act['timestamp'] if last_act else None
 
-    return dict(current_user=current_user, recent_activities=recent_activities, site_pulse=site_pulse)
+    activity = _get_navbar_activity()
+    return dict(current_user=current_user,
+                recent_activities=activity['recent_activities'],
+                site_pulse=activity['site_pulse'])
 
 # Forms
 class RegisterForm(FlaskForm):

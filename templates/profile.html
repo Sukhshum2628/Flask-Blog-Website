@@ -1,5 +1,10 @@
 {% extends 'base.html' %}
 
+{% block title %}{{ user.username }} — FlaskBlog{% endblock %}
+{% block meta_description %}{{ user.bio or (user.username ~ "'s stories on FlaskBlog.") }}{% endblock %}
+{% block og_type %}profile{% endblock %}
+{% if user.avatar_url %}{% block og_image %}{{ user.avatar_url }}{% endblock %}{% endif %}
+
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-8">

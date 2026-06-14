@@ -385,7 +385,7 @@ def answer_question(context, question):
             completion = client.chat.completions.create(
                 model=AI_MODEL,
                 messages=messages,
-                temperature=0.7,
+                temperature=0.2,
                 max_tokens=1024
             )
             if not completion.choices:

@@ -1,5 +1,25 @@
 {% extends 'base.html' %}
 
+{% block title %}{{ post.title }} — FlaskBlog{% endblock %}
+{% block meta_description %}{{ post.subtitle or post.summary or (post.content | striptags | truncate(155, True)) }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% if post.cover_url %}{% block og_image %}{{ post.cover_url }}{% endblock %}{% endif %}
+{% block structured_data %}
+<script type="application/ld+json" nonce="{{ csp_nonce }}">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": {{ post.title | tojson }},
+  "description": {{ (post.subtitle or post.summary or (post.content | striptags | truncate(155, True))) | tojson }},
+  {% if post.cover_url %}"image": {{ post.cover_url | tojson }},{% endif %}
+  "author": { "@type": "Person", "name": {{ post.author | tojson }} },
+  "datePublished": "{{ post.created_at.isoformat() if post.created_at else '' }}",
+  "dateModified": "{{ (post.updated_at or post.created_at).isoformat() if (post.updated_at or post.created_at) else '' }}",
+  "mainEntityOfPage": {{ request.url | tojson }}
+}
+</script>
+{% endblock %}
+
 {% block head %}
 <!-- Marked.js for Markdown rendering -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

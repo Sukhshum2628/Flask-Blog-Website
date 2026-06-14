@@ -66,9 +66,12 @@
                                 </div>
                             {% else %}
                                 <div>
-                                     <a href="{{ url_for('bookmark_post', post_id=post._id) }}" class="btn btn-sm btn-outline-secondary" title="Remove">
-                                        <i class="bi bi-bookmark-x"></i>
-                                     </a>
+                                     <form method="POST" action="{{ url_for('bookmark_post', post_id=post._id) }}" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Remove">
+                                            <i class="bi bi-bookmark-x"></i>
+                                        </button>
+                                     </form>
                                 </div>
                             {% endif %}
                         </div>

@@ -24,7 +24,68 @@ client = OpenAI(
     api_key=AI_API_KEY or "missing"
 )
 
+# Embedding model for semantic retrieval (OpenAI-compatible NVIDIA endpoint).
+# nv-embedqa-e5-v5 is a retrieval model and requires an "input_type" hint
+# ("query" for the question, "passage" for the chunks).
+EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
+RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "4"))
+
 import re
+import math
+
+
+def _embed(texts, input_type):
+    """Embed a list of strings via the NVIDIA endpoint. Returns list[list[float]]."""
+    resp = client.embeddings.create(
+        model=EMBED_MODEL,
+        input=texts,
+        extra_body={"input_type": input_type, "truncate": "END"},
+    )
+    return [d.embedding for d in resp.data]
+
+
+def _cosine(a, b):
+    """Cosine similarity between two equal-length vectors (pure Python, no numpy)."""
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def retrieve_chunks(question, chunks, top_k=RETRIEVAL_TOP_K):
+    """
+    Semantic top-k retrieval. Embeds the question and every chunk, then returns
+    the most relevant chunks as (original_index, chunk_text) pairs, sorted by
+    similarity. Original indices are preserved so citations still point to the
+    true position in the article.
+
+    Graceful fallback: if there are few chunks, or embeddings fail (quota/network),
+    fall back to returning all chunks in order so the pipeline never crashes.
+    """
+    if not chunks:
+        return []
+
+    # Not worth an embedding round-trip if everything fits anyway.
+    if len(chunks) <= top_k:
+        return list(enumerate(chunks))
+
+    try:
+        q_vec = _embed([question], input_type="query")[0]
+        chunk_vecs = _embed(chunks, input_type="passage")
+        scored = [
+            (i, chunks[i], _cosine(q_vec, chunk_vecs[i]))
+            for i in range(len(chunks))
+        ]
+        scored.sort(key=lambda x: x[2], reverse=True)
+        top = scored[:top_k]
+        # Keep the article's natural order among the selected chunks for readability.
+        top.sort(key=lambda x: x[0])
+        return [(i, c) for (i, c, _score) in top]
+    except Exception as e:
+        print(f"AI WARN (retrieval fell back to all chunks): {e}", flush=True)
+        return list(enumerate(chunks))
 
 def summarize_text(text):
     """Generates a concise summary of the provided text with a grounded prompt (no RAG)."""
@@ -94,20 +155,11 @@ def summarize_text(text):
         }
     except Exception as e:
         print(f"Error in summarize_text: {e}")
-        return {
-            "summary": ["Failed to generate summary."], 
-            "insight": str(e), 
-            "sources": [], 
-            "internet_sources": [],
-            "citation_mapping": {}
-        }
-    except Exception as e:
-        print(f"Error in summarize_text: {e}")
         print(traceback.format_exc())
         return {
-            "summary": ["Failed to generate summary."], 
-            "insight": "An error occurred.", 
-            "sources": [], 
+            "summary": ["Failed to generate summary."],
+            "insight": "An error occurred.",
+            "sources": [],
             "internet_sources": [],
             "citation_mapping": {}
         }
@@ -150,11 +202,24 @@ def _parse_llm_response(text, fallback_context=None):
         insight = "Insight derived from raw summary: " + (text.strip()[:100] + "...")
     elif not summary_points:
         summary_points = [text.strip()]
-    elif not insight:
-        if summary_points:
-            insight = f"Key takeaway: {summary_points[-1]}"
-        else:
-            insight = "Focus on the facts presented in the context."
+    # Note: if the model gave no distinct insight, leave it empty rather than
+    # echoing the last bullet. Duplicating a point adds no information and drags
+    # down answer-relevancy (the answer looks padded/repetitive).
+
+    # Drop near-duplicate bullets and any "the article does not say..." non-answers
+    # that pad the response without addressing the question.
+    cleaned = []
+    seen = set()
+    for p in summary_points:
+        norm = re.sub(r'\s+', ' ', p.lower()).strip(' .')
+        if not norm or norm in seen:
+            continue
+        if re.search(r'\b(does not|doesn\'t|not stated|not mentioned|not specif|is missing|no information)\b', norm):
+            continue
+        seen.add(norm)
+        cleaned.append(p)
+    if cleaned:
+        summary_points = cleaned
             
     # Artificially construct bullets if the summary is just one long paragraph
     if len(summary_points) == 1 and len(summary_points[0]) > 100:
@@ -166,9 +231,23 @@ def _parse_llm_response(text, fallback_context=None):
     return summary_points, insight.strip()
 
 def chunk_text(text):
-    """Splits text into paragraphs and returns a list of chunks."""
-    # Split by newlines (paragraphs)
-    paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+    """
+    Splits text into chunks on paragraph boundaries (blank lines), NOT on every
+    newline. Splitting on single newlines fragments wrapped paragraphs mid-
+    sentence, which causes the retriever to grab half a thought and the LLM to
+    miss information that lives in the other half.
+    """
+    if not text:
+        return []
+    # Split on one-or-more blank lines (a "paragraph break").
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+    # Collapse any remaining internal single newlines so each chunk is clean prose.
+    paragraphs = [re.sub(r'\s*\n\s*', ' ', p) for p in paragraphs]
+
+    # Fallback: if the text had no blank-line breaks at all (one big blob),
+    # fall back to single-newline splitting so we still get multiple chunks.
+    if len(paragraphs) <= 1:
+        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
     return paragraphs
 
 def _get_jaccard_similarity(str1, str2):
@@ -236,9 +315,12 @@ def answer_question(context, question):
 
     print(f"AI RESEARCH: Processing question '{question}'", flush=True)
 
-    # 1. Chunk the blog context for grounded citations
-    context_chunks = chunk_text(context)
-    
+    # 1. Chunk the blog, then RETRIEVE only the most relevant chunks for this
+    #    question (semantic top-k) instead of feeding the whole article.
+    all_chunks = chunk_text(context)
+    retrieved = retrieve_chunks(question, all_chunks)  # [(orig_index, text), ...]
+    context_chunks = [c for (_idx, c) in retrieved]
+
     import string
     alphabet = string.ascii_uppercase
     labeled_chunks = []
@@ -246,7 +328,7 @@ def answer_question(context, question):
         label = alphabet[i % 26] if i < 26 else f"{alphabet[(i//26)-1]}{alphabet[i%26]}"
         labeled_chunks.append(f"Chunk {label}:\n{c}")
     chunked_context_str = "\n\n".join(labeled_chunks)
-    
+
     max_chunk_id = len(context_chunks)
 
     search_context = ""
@@ -275,10 +357,17 @@ def answer_question(context, question):
 
     # 2. Prepare the LLM prompt
     system_prompt = (
-        "You are a helpful assistant.\n"
-        "Read the blog content and generate a meaningful answer to the user's question.\n"
-        "Format your answer with exactly 3-5 concise bullet points. Avoid long paragraphs.\n"
-        "Provide one KEY INSIGHT (1-2 sentences max) that interprets the broader meaning, rather than simply repeating the summary.\n"
+        "You are a precise assistant. Answer the question using ONLY the blog sections provided.\n"
+        "Every claim in your answer must be directly supported by the text. If the article does "
+        "not address the question, say so plainly instead of guessing or adding outside knowledge.\n"
+        "Do NOT add preamble like 'Here are the points'. Start directly with the answer.\n"
+        "Format the answer as 3-5 concise bullet points, each stating a fact found in the text. "
+        "Every bullet must directly answer the question - do NOT add bullets that merely note "
+        "what the article does not say, and do not repeat the same point twice.\n"
+        "Avoid long paragraphs and do not speculate about methodology, causes, or implications "
+        "that the article does not state.\n"
+        "Then add one KEY INSIGHT (1-2 sentences) that connects the facts above - it must still "
+        "be grounded in the article, not external opinion.\n"
         "Do NOT return 'No response generated'."
     )
 
@@ -356,7 +445,8 @@ def answer_question(context, question):
             "insight": parsed_insight,
             "sources": sources_data,
             "internet_sources": unique_net_sources,
-            "citation_mapping": citation_mapping
+            "citation_mapping": citation_mapping,
+            "retrieved_chunks": context_chunks
         }
     except Exception as e:
         print(f"AI ERROR (LLM): {e}", flush=True)

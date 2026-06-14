@@ -15,3 +15,8 @@ Flask-Login
 tavily-python
 flask-limiter
 beautifulsoup4
+
+# --- RAG evaluation (dev only, not needed to run the blog) ---
+# ragas
+# datasets
+# langchain-nvidia-ai-endpoints

@@ -3,11 +3,13 @@ import math
 import re
 import threading
 from datetime import datetime, timezone, timedelta
-from flask import Flask, render_template, request, redirect, session, url_for, flash, abort, jsonify, make_response
+import secrets
+from flask import Flask, render_template, request, redirect, session, url_for, flash, abort, jsonify, make_response, g
 from flask_pymongo import PyMongo
 from flask_wtf import FlaskForm
+from flask_wtf.csrf import CSRFProtect
 from wtforms import StringField, PasswordField, TextAreaField, SubmitField, SelectField
-from wtforms.validators import DataRequired, Length, Optional, EqualTo
+from wtforms.validators import DataRequired, Length, Optional
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 import bleach
@@ -22,7 +24,16 @@ load_dotenv()
 app = Flask(__name__)
 # ... (config follows)
 app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
+if app.secret_key == "dev_secret_key_change_me":
+    # Sessions and password-reset tokens are only as safe as this key. Falling
+    # back to the hardcoded default in production makes them forgeable.
+    print("WARNING: SECRET_KEY not set - using insecure dev default. "
+          "Set SECRET_KEY in the environment for production.", flush=True)
 app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
+
+# CSRF protection for all form POSTs. JSON/SSE fetch endpoints (called by JS
+# without a token) are individually exempted with @csrf.exempt below.
+csrf = CSRFProtect(app)
 
 mongo = PyMongo(app)
 users = mongo.db.users
@@ -32,12 +43,19 @@ activities = mongo.db.activities
 reading_sessions = mongo.db.reading_sessions
 reading_history = mongo.db.reading_history
 
+# NOTE: the active inject_user context processor is defined further below
+# (it also injects recent_activities + site_pulse). A second, simpler copy used
+# to live here and was silently overridden by the later one.
+
+@app.before_request
+def set_csp_nonce():
+    # Fresh per-request nonce so inline <script> blocks can be whitelisted
+    # without allowing arbitrary injected script ('unsafe-inline').
+    g.csp_nonce = secrets.token_urlsafe(16)
+
 @app.context_processor
-def inject_user():
-    user = None
-    if 'user' in session:
-        user = users.find_one({'username': session['user']})
-    return dict(current_user=user)
+def inject_csp_nonce():
+    return dict(csp_nonce=getattr(g, 'csp_nonce', ''))
 
 @app.after_request
 def add_security_headers(response):
@@ -45,7 +63,17 @@ def add_security_headers(response):
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    response.headers['Content-Security-Policy'] = "default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:;"
+    nonce = getattr(g, 'csp_nonce', '')
+    # script-src: nonce-based, no 'unsafe-inline'/'unsafe-eval'. Inline scripts
+    # must carry nonce="{{ csp_nonce }}". style-src keeps 'unsafe-inline' because
+    # inline style="" attributes (used throughout) cannot take a nonce.
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self' https:; "
+        f"script-src 'self' https: 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline' https:; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' https: data:;"
+    )
     return response
 
 @app.route('/sitemap.xml')
@@ -236,6 +264,7 @@ def ping():
     return {'status': 'ok'}, 200
 
 @app.route('/api/save_progress/<post_id>', methods=['POST'])
+@csrf.exempt
 def save_progress(post_id):
     if 'user' not in session:
         return {'status': 'ignored'}, 200
@@ -317,7 +346,7 @@ def verify_reset_token(token, expires_sec=1800):
     s = Serializer(app.secret_key)
     try:
         user_id = s.loads(token, max_age=expires_sec)['user_id']
-    except:
+    except Exception:
         return None
     return users.find_one({'_id': ObjectId(user_id)})
 
@@ -440,7 +469,10 @@ def search_suggestions():
 
 @app.route('/')
 def index():
-    page = int(request.args.get('page', 1))
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except (TypeError, ValueError):
+        page = 1
     tab = request.args.get('tab', 'latest')
     per_page = 5
     
@@ -749,12 +781,19 @@ def view_post(post_id):
         }, sort=[('created_at', 1)])
 
     # Related Posts
-    all_other_posts = list(posts.find({'is_draft': {'$ne': True}, '_id': {'$ne': ObjectId(post_id)}}).limit(50))
+    # Only the fields get_related_posts actually scores/renders - avoid pulling
+    # 50 full article bodies into memory on every post view.
+    related_fields = {'title': 1, 'tags': 1, 'author': 1, 'cover_url': 1,
+                      'subtitle': 1, 'created_at': 1}
+    all_other_posts = list(posts.find(
+        {'is_draft': {'$ne': True}, '_id': {'$ne': ObjectId(post_id)}},
+        related_fields
+    ).limit(50))
     related_posts = ai_service.get_related_posts(post, all_other_posts)
 
     return render_template('post_detail.html', post=post, author=author, comments=post_comments, form=form, read_time=read_time, is_author=is_author, user_reaction=user_reaction, reaction_counts=reaction_counts, is_bookmarked=is_bookmarked, active_readers=active_readers, series_prev=series_prev, series_next=series_next, server_progress=server_progress, related_posts=related_posts)
 
-@app.route('/post/<post_id>/bookmark')
+@app.route('/post/<post_id>/bookmark', methods=['POST'])
 def bookmark_post(post_id):
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -773,6 +812,7 @@ def bookmark_post(post_id):
 
 # AI Routes
 @app.route('/ai/summarize/<post_id>', methods=['POST'])
+@csrf.exempt
 def ai_summarize(post_id):
     try:
         post = posts.find_one({'_id': ObjectId(post_id)})
@@ -810,6 +850,7 @@ def ai_summarize(post_id):
         return jsonify({"summary": ["An error occurred."], "insight": ""}), 500
 
 @app.route('/ai/ask/<post_id>', methods=['POST'])
+@csrf.exempt
 def ai_ask(post_id):
     # This route is now a fallback for non-streaming clients or 
     # could be deprecated in favor of /api/chat/stream
@@ -832,6 +873,7 @@ def ai_chat_stream(post_id):
     return Response(ai_service.stream_answer(clean_text, question), mimetype='text/event-stream')
 
 @app.route('/ai/research', methods=['POST'])
+@csrf.exempt
 def ai_research():
     if 'user' not in session:
         return {'error': 'Unauthorized'}, 401
@@ -877,6 +919,7 @@ def get_job_status(job_id):
     })
 
 @app.route('/ai/improve-draft', methods=['POST'])
+@csrf.exempt
 def ai_improve_draft():
     if 'user' not in session:
         return {'error': 'Unauthorized'}, 401
@@ -894,8 +937,6 @@ def ai_improve_draft():
     except Exception as e:
         print(f"AI IMPROVE ERROR: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
-        print(f"AI IMPROVE ERROR: {e}", flush=True)
-        return {'error': str(e)}, 500
 
 @app.route('/post/<post_id>/edit', methods=['GET', 'POST'])
 def edit_post(post_id):
@@ -972,7 +1013,7 @@ def delete_post(post_id):
         
     return redirect(url_for('dashboard'))
 
-@app.route('/post/<post_id>/react/<reaction_type>')
+@app.route('/post/<post_id>/react/<reaction_type>', methods=['POST'])
 def react_post(post_id, reaction_type):
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -998,7 +1039,7 @@ def react_post(post_id, reaction_type):
             
     return redirect(url_for('view_post', post_id=post_id))
 
-@app.route('/comment/<comment_id>/pin')
+@app.route('/comment/<comment_id>/pin', methods=['POST'])
 def pin_comment(comment_id):
     if 'user' not in session:
         return redirect(url_for('login'))
@@ -1112,6 +1153,7 @@ def settings_account():
 
 @app.route('/api/bookmark/<post_id>', methods=['POST'])
 @limiter.limit("10 per minute")
+@csrf.exempt
 def toggle_bookmark(post_id):
     if 'user' not in session:
         return jsonify({'error': 'Login required'}), 401

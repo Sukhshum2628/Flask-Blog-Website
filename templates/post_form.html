@@ -54,7 +54,7 @@
     <div class="col-lg-8">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2 class="mb-0">{{ legend|default("New Story") }}</h2>
-            <button type="button" class="btn btn-outline-success rounded-pill" onclick="toggleResearchPanel()">
+            <button type="button" class="btn btn-outline-success rounded-pill" id="researchToggleBtn">
                 <i class="bi bi-search"></i> AI Research Assistant
             </button>
         </div>
@@ -136,7 +136,7 @@
 <div class="research-panel" id="researchPanel">
     <div class="card-header bg-dark text-white p-3 d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-robot"></i> Research Assistant</h5>
-        <button type="button" class="btn-close btn-close-white" onclick="toggleResearchPanel()"></button>
+        <button type="button" class="btn-close btn-close-white" id="researchCloseBtn"></button>
     </div>
     <div class="p-3 border-bottom">
         <div class="input-group">
@@ -186,7 +186,7 @@
 <!-- jQuery & Trumbowyg -->
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/trumbowyg.min.js"></script>
-<script>
+<script nonce="{{ csp_nonce }}">
     $('#editor').trumbowyg({
         btns: [
             ['viewHTML'],
@@ -207,6 +207,15 @@
     function toggleResearchPanel() {
         document.getElementById('researchPanel').classList.toggle('open');
     }
+
+    // Replace inline onclick (blocked by CSP nonce) with listeners.
+    document.getElementById('researchToggleBtn')?.addEventListener('click', toggleResearchPanel);
+    document.getElementById('researchCloseBtn')?.addEventListener('click', toggleResearchPanel);
+    // Delegation: Copy Fact buttons are injected dynamically after research runs.
+    document.getElementById('researchContent')?.addEventListener('click', function(e) {
+        const btn = e.target.closest('.copy-fact-btn');
+        if (btn) copyAmmunition(btn.dataset.copyIdx, btn);
+    });
 
     document.getElementById('runResearchBtn').addEventListener('click', async function() {
         const queryInput = document.getElementById('researchQuery');
@@ -270,7 +279,7 @@
                     <div class="fact">${item.fact}</div>
                     <div class="small mb-2"><a href="${item.source}" target="_blank" class="text-decoration-none text-success">Source Link</a></div>
                     <div class="suggested mb-2">${item.suggested_use}</div>
-                    <button class="btn btn-sm btn-light border w-100" onclick="copyAmmunition(${idx}, this)">
+                    <button type="button" class="btn btn-sm btn-light border w-100 copy-fact-btn" data-copy-idx="${idx}">
                         <i class="bi bi-clipboard"></i> Copy Fact
                     </button>
                     <div id="fact-${idx}" class="d-none">${item.fact}</div>

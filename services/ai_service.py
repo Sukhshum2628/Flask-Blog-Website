@@ -9,7 +9,7 @@ load_dotenv()
 # Llama 3 8B Instruct Configuration (via NVIDIA)
 AI_API_KEY = os.environ.get("AI_API_KEY")
 AI_BASE_URL = "https://integrate.api.nvidia.com/v1"
-AI_MODEL = "meta/llama-3.1-8b-instruct"
+AI_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 # Tavily Configuration
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")

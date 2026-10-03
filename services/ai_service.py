@@ -6,10 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Llama 3 8B Instruct Configuration (via NVIDIA)
+# LLM & Embedding Configuration (via NVIDIA NIM or compatible OpenAI endpoint)
 AI_API_KEY = os.environ.get("AI_API_KEY")
-AI_BASE_URL = "https://integrate.api.nvidia.com/v1"
-AI_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://integrate.api.nvidia.com/v1")
+AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-3.2-nv-embedqa-1b-v1")
 
 # Tavily Configuration
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
@@ -24,11 +25,22 @@ client = OpenAI(
     api_key=AI_API_KEY or "missing"
 )
 
-# Embedding model for semantic retrieval (OpenAI-compatible NVIDIA endpoint).
-# nv-embedqa-e5-v5 is a retrieval model and requires an "input_type" hint
-# ("query" for the question, "passage" for the chunks).
-EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
 RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "4"))
+
+def _format_ai_error(e):
+    """Returns a clean, actionable user-facing error message from an API exception."""
+    err_str = str(e)
+    if "403" in err_str or "Forbidden" in err_str or "Authorization failed" in err_str:
+        return "AI authorization failed. Please verify that your AI_API_KEY is active and valid in your settings."
+    if "401" in err_str or "Unauthorized" in err_str:
+        return "AI authentication failed. Invalid API key provided."
+    if "410" in err_str or "Gone" in err_str:
+        return f"Configured model '{AI_MODEL}' is no longer supported or reached end-of-life. Please update AI_MODEL in your environment settings."
+    if "429" in err_str or "rate limit" in err_str.lower():
+        return "AI request rate limit reached. Please wait a moment and try again."
+    if "503" in err_str or "502" in err_str or "service unavailable" in err_str.lower():
+        return "AI service is temporarily unavailable. Please try again shortly."
+    return f"AI service error: {err_str[:120]}"
 
 import re
 import math
@@ -154,11 +166,12 @@ def summarize_text(text):
             "citation_mapping": {}
         }
     except Exception as e:
-        print(f"Error in summarize_text: {e}")
-        print(traceback.format_exc())
+        print(f"Error in summarize_text: {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
+        user_err = _format_ai_error(e)
         return {
-            "summary": ["Failed to generate summary."],
-            "insight": "An error occurred.",
+            "summary": [f"Unable to generate summary: {user_err}"],
+            "insight": "Please check your AI service credentials and model configuration.",
             "sources": [],
             "internet_sources": [],
             "citation_mapping": {}
@@ -451,11 +464,10 @@ def answer_question(context, question):
     except Exception as e:
         print(f"AI ERROR (LLM): {e}", flush=True)
         print(traceback.format_exc(), flush=True)
-        
-        # Graceful fallback that preserves structure
+        user_err = _format_ai_error(e)
         return {
-            "summary": ["Failed to generate answer."],
-            "insight": "An error occurred. Please try again.",
+            "summary": [f"Failed to generate answer: {user_err}"],
+            "insight": "Please check your AI service credentials and model configuration.",
             "sources": [],
             "internet_sources": [],
             "citation_mapping": {}
@@ -527,7 +539,7 @@ def research_topic(topic, draft_context=""):
         )
         
         if not completion.choices:
-             return {"error": "No research content generated."}
+             return {"error": "AI model returned an empty response. Please verify the AI model configuration."}
         raw_answer = completion.choices[0].message.content
         
         import json
@@ -536,10 +548,27 @@ def research_topic(topic, draft_context=""):
             ammunition = json.loads(json_match.group())
             return {"ammunition": ammunition}
             
-        return {"error": "Failed to parse writing ammunition."}
+        return {"error": "Failed to parse writing ammunition from AI."}
     except Exception as e:
-        print(f"Error in research_topic: {e}")
-        return {"error": "Research failed."}
+        print(f"Error in research_topic: {e}", flush=True)
+        user_err = _format_ai_error(e)
+        # Graceful fallback: if LLM fails but Tavily returned search results, provide raw facts from Tavily
+        if 'search_results' in locals() and search_results:
+            fallback_items = []
+            for r in search_results[:4]:
+                content_snippet = (r.get('content') or r.get('title') or '').strip()
+                if content_snippet:
+                    fallback_items.append({
+                        "fact": content_snippet[:220] + ("..." if len(content_snippet) > 220 else ""),
+                        "source": r.get('url', ''),
+                        "suggested_use": "Direct snippet from web search (AI synthesis temporarily unavailable)."
+                    })
+            if fallback_items:
+                return {
+                    "ammunition": fallback_items,
+                    "warning": user_err
+                }
+        return {"error": user_err}
 
 def get_related_posts(current_post, all_posts_list, limit=3):
     """
@@ -612,7 +641,7 @@ def improve_draft(draft_text):
         }
     except Exception as e:
         print(f"Error in improve_draft: {e}", flush=True)
-        return {"error": "Failed to improve draft."}
+        return {"error": _format_ai_error(e)}
 
 def stream_answer(context, question):
     """Streams a grounded answer to a user question using SSE."""
@@ -641,4 +670,5 @@ def stream_answer(context, question):
             if chunk.choices and chunk.choices[0].delta.content:
                 yield f"data: {chunk.choices[0].delta.content}\n\n"
     except Exception as e:
-        yield f"data: [ERROR] {str(e)}\n\n"
+        err_msg = _format_ai_error(e)
+        yield f"data: [ERROR] {err_msg}\n\n"

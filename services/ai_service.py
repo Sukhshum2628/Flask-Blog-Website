@@ -20,9 +20,13 @@ if not AI_API_KEY:
 if not TAVILY_API_KEY:
     print("WARNING: TAVILY_API_KEY not found in environment.", flush=True)
 
+AI_TIMEOUT = float(os.environ.get("AI_TIMEOUT", "25.0"))
+
 client = OpenAI(
     base_url=AI_BASE_URL,
-    api_key=AI_API_KEY or "missing"
+    api_key=AI_API_KEY or "missing",
+    timeout=AI_TIMEOUT,
+    max_retries=1
 )
 
 RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "4"))
@@ -107,23 +111,22 @@ def summarize_text(text):
     system_prompt = (
         "You are a precise content analyst. Your only source of truth is the article text provided below.\n"
         "Do NOT use any outside knowledge. Do NOT reference other articles or the web.\n"
-        "If something is not stated in the article, do not include it."
+        "If something is not stated in the article, do not include it.\n"
+        "IMPORTANT: Return ONLY a valid, raw JSON object. Do NOT include any internal thoughts, analysis steps, preamble, explanation, or markdown fences."
     )
 
     user_content = (
-        "Analyze ONLY the following article and produce:\n"
-        "1. A 3–5 point executive summary (each point: one clear sentence, grounded in a specific claim from the article)\n"
-        "2. A \"Key Insight\" (1–2 sentences): What is the ONE non-obvious takeaway a reader should remember?\n\n"
+        "Analyze the following article and return pure JSON with keys \"summary_points\" (array of 3-5 strings, each one clear sentence grounded in the article) and \"key_insight\" (one string: non-obvious takeaway):\n\n"
         "Article:\n"
         "\"\"\"\n"
         f"{text}\n"
         "\"\"\"\n\n"
-        "Return your response in this exact JSON format:\n"
+        "Format:\n"
         "{\n"
         "  \"summary_points\": [\"point 1\", \"point 2\", \"point 3\"],\n"
         "  \"key_insight\": \"insight here\"\n"
         "}\n"
-        "Return ONLY the JSON. No preamble, no markdown fences."
+        "Output ONLY the JSON object. No other text."
     )
 
     try:
@@ -134,7 +137,7 @@ def summarize_text(text):
                 {"role": "user", "content": user_content}
             ],
             temperature=0.1,
-            max_tokens=800
+            max_tokens=1500
         )
         if not completion.choices:
             return {
@@ -144,23 +147,54 @@ def summarize_text(text):
                 "internet_sources": [],
                 "citation_mapping": {}
             }
-        raw_answer = completion.choices[0].message.content
+        raw_answer = completion.choices[0].message.content or ""
         
+        # 1. Try direct JSON parsing
         import json
         json_match = re.search(r'\{.*\}', raw_answer, re.DOTALL)
         if json_match:
-            data = json.loads(json_match.group())
-            return {
-                "summary": data.get("summary_points", []),
-                "insight": data.get("key_insight", ""),
-                "sources": [], 
-                "internet_sources": [],
-                "citation_mapping": {}
-            }
-        
+            try:
+                data = json.loads(json_match.group())
+                points = data.get("summary_points", [])
+                insight = data.get("key_insight", "")
+                if points and isinstance(points, list):
+                    return {
+                        "summary": points,
+                        "insight": insight,
+                        "sources": [], 
+                        "internet_sources": [],
+                        "citation_mapping": {}
+                    }
+            except Exception:
+                pass
+
+        # 2. Strip thinking/reasoning prefixes if present
+        clean_text = raw_answer
+        if "```json" in clean_text:
+            json_block = re.search(r'```json\s*(\{.*?\})\s*```', clean_text, re.DOTALL)
+            if json_block:
+                try:
+                    data = json.loads(json_block.group(1))
+                    return {
+                        "summary": data.get("summary_points", []),
+                        "insight": data.get("key_insight", ""),
+                        "sources": [],
+                        "internet_sources": [],
+                        "citation_mapping": {}
+                    }
+                except Exception:
+                    pass
+
+        # 3. Use _parse_llm_response as robust fallback for non-JSON text
+        pts, ins = _parse_llm_response(clean_text, fallback_context=text)
+        # Filter out internal thinking process lines if any leaked into points
+        cleaned_pts = [p for p in pts if not p.lower().startswith("here's a thinking process") and not p.lower().startswith("1. **analyze")]
+        if not cleaned_pts:
+            cleaned_pts = pts
+
         return {
-            "summary": [raw_answer.strip()],
-            "insight": "",
+            "summary": cleaned_pts,
+            "insight": ins,
             "sources": [],
             "internet_sources": [],
             "citation_mapping": {}
@@ -169,12 +203,36 @@ def summarize_text(text):
         print(f"Error in summarize_text: {e}", flush=True)
         print(traceback.format_exc(), flush=True)
         user_err = _format_ai_error(e)
+
+        # Smart Extractive Fallback: if LLM call fails, extract key sentences from the text so reader gets a summary
+        fallback_bullets = []
+        if text:
+            # Split into sentences
+            raw_sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if len(s.strip()) > 35]
+            # Take up to 4 strong leading sentences across paragraphs
+            for sent in raw_sentences[:4]:
+                clean_sent = re.sub(r'\s+', ' ', sent).strip()
+                if clean_sent:
+                    fallback_bullets.append(clean_sent)
+
+        if fallback_bullets:
+            return {
+                "summary": fallback_bullets,
+                "insight": "Key points extracted from article text (AI synthesis temporarily unavailable).",
+                "sources": [],
+                "internet_sources": [],
+                "citation_mapping": {},
+                "warning": user_err,
+                "is_fallback": True
+            }
+
         return {
             "summary": [f"Unable to generate summary: {user_err}"],
             "insight": "Please check your AI service credentials and model configuration.",
             "sources": [],
             "internet_sources": [],
-            "citation_mapping": {}
+            "citation_mapping": {},
+            "error": user_err
         }
 
 def _parse_llm_response(text, fallback_context=None):
@@ -521,7 +579,7 @@ def research_topic(topic, draft_context=""):
             "[\n"
             "  {\n"
             "    \"fact\": \"The specific claim or data point\",\n"
-            "    \"source\": \"Source name or URL\",\n"
+            "    \"source\": \"The exact Source URL from the results above (must start with https:// or http://)\",\n"
             "    \"suggested_use\": \"One sentence on how the author could work this into their draft\"\n"
             "  }\n"
             "]\n"
@@ -546,6 +604,13 @@ def research_topic(topic, draft_context=""):
         json_match = re.search(r'\[.*\]', raw_answer, re.DOTALL)
         if json_match:
             ammunition = json.loads(json_match.group())
+            # Ensure every item has a valid absolute HTTP/HTTPS URL
+            valid_urls = [r.get('url') for r in search_results if r.get('url')]
+            for i, item in enumerate(ammunition):
+                src = (item.get('source') or '').strip()
+                if not (src.startswith('http://') or src.startswith('https://')):
+                    # Fallback to the corresponding Tavily search result URL if LLM returned name or relative text
+                    item['source'] = valid_urls[i % len(valid_urls)] if valid_urls else ''
             return {"ammunition": ammunition}
             
         return {"error": "Failed to parse writing ammunition from AI."}

@@ -886,9 +886,12 @@ def ai_summarize(post_id):
         # 1. Check Cache
         if 'summary_cache' in post:
             cache_data = post['summary_cache']
-            # Only use cache if it was generated after the last update
+            # Only use cache if it was generated after the last update and is not an error/fallback
             updated_at = post.get('updated_at', post.get('created_at'))
-            if cache_data.get('generated_at') and cache_data['generated_at'] >= updated_at:
+            if (cache_data.get('generated_at') and 
+                cache_data['generated_at'] >= updated_at and 
+                not cache_data.get('error') and 
+                not cache_data.get('is_fallback')):
                 return jsonify(cache_data)
 
         # 2. Extract Full Text with BeautifulSoup
@@ -901,10 +904,11 @@ def ai_summarize(post_id):
         # 3. Call AI
         result = ai_service.summarize_text(full_text)
         
-        # 4. Save to Cache
+        # 4. Save to Cache only if it's a genuine AI summary (not error or temporary fallback)
         if isinstance(result, dict) and 'summary' in result:
-            result['generated_at'] = datetime.now(timezone.utc)
-            posts.update_one({'_id': ObjectId(post_id)}, {'$set': {'summary_cache': result}})
+            if not result.get('error') and not result.get('is_fallback'):
+                result['generated_at'] = datetime.now(timezone.utc)
+                posts.update_one({'_id': ObjectId(post_id)}, {'$set': {'summary_cache': result}})
             return jsonify(result)
         else:
             return jsonify({"summary": ["Failed to extract summary."], "insight": ""}), 500

@@ -274,10 +274,23 @@
         
         let html = '<div class="small fw-bold text-muted text-uppercase mb-3">Writing Ammunition</div>';
         items.forEach((item, idx) => {
+            const rawSource = (item.source || '').trim();
+            let sourceHtml = '';
+            if (rawSource.startsWith('http://') || rawSource.startsWith('https://')) {
+                sourceHtml = `<a href="${rawSource}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-success"><i class="bi bi-box-arrow-up-right me-1"></i>Source Link</a>`;
+            } else if (rawSource) {
+                // If it's a domain without scheme (e.g. "techcrunch.com/article"), prefix https://
+                if (/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(\/.*)?$/.test(rawSource)) {
+                    sourceHtml = `<a href="https://${rawSource}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-success"><i class="bi bi-box-arrow-up-right me-1"></i>${rawSource}</a>`;
+                } else {
+                    sourceHtml = `<span class="text-muted fst-italic"><i class="bi bi-journal-text me-1"></i>Source: ${rawSource}</span>`;
+                }
+            }
+
             html += `
                 <div class="ammunition-card">
                     <div class="fact">${item.fact}</div>
-                    <div class="small mb-2"><a href="${item.source}" target="_blank" class="text-decoration-none text-success">Source Link</a></div>
+                    ${sourceHtml ? `<div class="small mb-2">${sourceHtml}</div>` : ''}
                     <div class="suggested mb-2">${item.suggested_use}</div>
                     <button type="button" class="btn btn-sm btn-light border w-100 copy-fact-btn" data-copy-idx="${idx}">
                         <i class="bi bi-clipboard"></i> Copy Fact

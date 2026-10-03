@@ -115,6 +115,12 @@
             {% if post.subtitle %}
                 <h4 class="text-muted mb-4">{{ post.subtitle }}</h4>
             {% endif %}
+
+            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                <button class="btn btn-sm btn-outline-success rounded-pill summarize-trigger-btn">
+                    <i class="bi bi-robot me-1"></i> AI Summarize Post
+                </button>
+            </div>
             
             {% if post.summary %}
                 <div class="p-3 bg-light border-start border-4 border-dark mb-4 fst-italic text-muted position-relative">
@@ -412,8 +418,8 @@
     });
 
     // AI Summarize
-    document.getElementById('summarizeBtn').addEventListener('click', async function() {
-        const btn = this;
+    async function handleSummarize() {
+        const btns = document.querySelectorAll('#summarizeBtn, .summarize-trigger-btn');
         const area = document.getElementById('aiSummaryArea');
         const content = document.getElementById('aiSummaryContent');
         
@@ -424,35 +430,49 @@
             <div class="skeleton-line w-75"></div>
             <div class="skeleton-line w-50"></div>
         `;
+        area.scrollIntoView({ behavior: 'smooth', block: 'center' });
         
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Summarizing...';
+        btns.forEach(btn => {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Summarizing...';
+        });
         
         try {
             const response = await fetch(`/ai/summarize/${postId}`, { method: 'POST' });
             const data = await response.json();
             
-            if (data.summary && Array.isArray(data.summary)) {
-                let html = '<ul class="mb-3">';
+            if (data.summary && Array.isArray(data.summary) && data.summary.length > 0) {
+                let html = '<ul class="mb-3 ps-3">';
                 data.summary.forEach(point => {
                     html += `<li class="mb-2">${point}</li>`;
                 });
                 html += '</ul>';
                 
                 if (data.insight) {
-                    html += `<div class="p-2 border-top small text-muted font-monospace">KEY INSIGHT: ${data.insight}</div>`;
+                    html += `<div class="p-2 border-top small text-muted font-monospace"><i class="bi bi-lightbulb me-1 text-warning"></i><strong>KEY INSIGHT:</strong> ${data.insight}</div>`;
                 }
 
                 content.innerHTML = html;
                 area.classList.remove('d-none');
                 area.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else if (data.error) {
+                content.innerHTML = `<div class="alert alert-warning py-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>${data.error}</div>`;
+            } else {
+                content.innerHTML = `<div class="text-muted small">No summary could be generated for this post.</div>`;
             }
         } catch (e) {
             console.error(e);
+            content.innerHTML = `<div class="alert alert-danger py-2 small mb-0"><i class="bi bi-x-circle me-1"></i>Unable to connect to AI summarization service. Please try again later.</div>`;
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-robot"></i> AI Summarize';
+            btns.forEach(btn => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-robot me-1"></i> AI Summarize';
+            });
         }
+    }
+
+    document.querySelectorAll('#summarizeBtn, .summarize-trigger-btn').forEach(btn => {
+        btn.addEventListener('click', handleSummarize);
     });
 
     // Lazy Load AI Panel

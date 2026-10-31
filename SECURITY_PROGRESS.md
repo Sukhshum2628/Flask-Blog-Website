@@ -12,7 +12,7 @@ This document tracks the incremental security hardening and remediation plan for
 
 | Phase | Description | Priority | Status | Git Commit |
 |:---:|:---|:---:|:---:|:---:|
-| **PHASE 0** | Repository Baseline & Security Audit | Critical | **COMPLETED** | *In Progress* |
+| **PHASE 0** | Repository Baseline & Security Audit | Critical | **COMPLETED** | `82bc55f` |
 | **PHASE 1** | SECRET_KEY & Session Security | Critical | NOT STARTED | — |
 | **PHASE 2** | Authentication & Authorization (IDOR, Job Ownership) | High | NOT STARTED | — |
 | **PHASE 3** | CSRF Protection & Logout Method Correction | High | NOT STARTED | — |

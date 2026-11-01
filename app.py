@@ -9,8 +9,9 @@ from flask_pymongo import PyMongo
 from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect
 from wtforms import StringField, PasswordField, TextAreaField, SubmitField, SelectField
-from wtforms.validators import DataRequired, Length, Optional
+from wtforms.validators import DataRequired, Length, Optional, EqualTo
 from werkzeug.security import generate_password_hash, check_password_hash
+import hashlib
 from bson.objectid import ObjectId
 import bleach
 from dotenv import load_dotenv
@@ -75,6 +76,7 @@ comments = mongo.db.comments
 activities = mongo.db.activities
 reading_sessions = mongo.db.reading_sessions
 reading_history = mongo.db.reading_history
+password_reset_tokens = mongo.db.password_reset_tokens
 
 # NOTE: the active inject_user context processor is defined further below
 # (it also injects recent_activities + site_pulse). A second, simpler copy used
@@ -265,13 +267,25 @@ def send_async_email(app, to_email, subject, body):
     with app.app_context():
         send_email_brevo(to_email, subject, body)
 
+def hash_password(password):
+    """Hash a password using modern scrypt algorithm with salt."""
+    return generate_password_hash(password, method='scrypt')
+
+def get_trusted_reset_url(token):
+    """Generate password reset URL bound to trusted host to mitigate Host header poisoning."""
+    app_url = os.environ.get('APP_URL') or os.environ.get('BASE_URL')
+    if app_url:
+        return f"{app_url.rstrip('/')}{url_for('reset_token', token=token)}"
+    return url_for('reset_token', token=token, _external=True)
+
 def send_reset_email(user):
     print(f"Attempting to send reset email to: {user['email']}", flush=True)
     token = get_reset_token(user['_id'])
+    reset_url = get_trusted_reset_url(token)
     
     subject = 'Password Reset Request'
     body = f'''To reset your password, visit the following link:
-{url_for('reset_token', token=token, _external=True)}
+{reset_url}
 
 If you did not make this request then simply ignore this email and no changes will be made.
 '''
@@ -457,16 +471,48 @@ def sanitize_html(content):
     return bleach.clean(content, tags=allowed_tags, attributes=allowed_attrs, strip=True)
 
 def get_reset_token(user_id, expires_sec=1800):
-    s = Serializer(app.secret_key)
-    return s.dumps({'user_id': str(user_id)})
+    """Generate a cryptographically secure, single-use, hashed password reset token."""
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=expires_sec)
+    
+    password_reset_tokens.insert_one({
+        'user_id': str(user_id),
+        'token_hash': token_hash,
+        'created_at': now,
+        'expires_at': expires_at,
+        'used': False
+    })
+    return raw_token
 
 def verify_reset_token(token, expires_sec=1800):
-    s = Serializer(app.secret_key)
-    try:
-        user_id = s.loads(token, max_age=expires_sec)['user_id']
-    except Exception:
+    """Verify that a password reset token is valid, unexpired, and unused."""
+    if not token or not isinstance(token, str):
         return None
-    return users.find_one({'_id': ObjectId(user_id)})
+    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+    now = datetime.now(timezone.utc)
+    
+    token_doc = password_reset_tokens.find_one({
+        'token_hash': token_hash,
+        'used': False
+    })
+    if not token_doc:
+        return None
+        
+    expires_at = token_doc.get('expires_at')
+    if not expires_at:
+        return None
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+        
+    if now > expires_at:
+        return None
+        
+    user_oid = get_valid_object_id(token_doc.get('user_id'))
+    if not user_oid:
+        return None
+    return users.find_one({'_id': user_oid})
 
 def _get_navbar_activity():
     """Recent-activity feed + site pulse for the navbar, cached ~30s.
@@ -500,12 +546,12 @@ def inject_user():
 class RegisterForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=20)])
     email = StringField('Email', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
+    password = PasswordField('Password', validators=[DataRequired(), Length(min=8, max=128, message='Password must be between 8 and 128 characters.')])
     submit = SubmitField('Sign Up')
 
 class LoginForm(FlaskForm):
     username = StringField('Username or Email', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[DataRequired(), Length(max=128)])
     submit = SubmitField('Login')
 
 class RequestResetForm(FlaskForm):
@@ -513,8 +559,12 @@ class RequestResetForm(FlaskForm):
     submit = SubmitField('Request Password Reset')
 
 class ResetPasswordForm(FlaskForm):
-    password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
-    confirm_password = PasswordField('Confirm Password', validators=[DataRequired()]) # Need EqualTo but skipping import for brevity, will check manually or trust user
+    password = PasswordField('Password', validators=[DataRequired(), Length(min=8, max=128, message='Password must be between 8 and 128 characters.')])
+    confirm_password = PasswordField('Confirm Password', validators=[
+        DataRequired(),
+        Length(max=128),
+        EqualTo('password', message='Passwords must match.')
+    ])
     submit = SubmitField('Reset Password')
 
 class PostForm(FlaskForm):
@@ -687,11 +737,12 @@ def register():
             flash('Email already registered.', 'danger')
             return redirect(url_for('register'))
         
-        hash_pwd = generate_password_hash(form.password.data)
+        hash_pwd = hash_password(form.password.data)
         users.insert_one({
             'username': form.username.data,
             'email': form.email.data,
             'password': hash_pwd,
+            'token_version': 1,
             'bio': "New writer.",
             'avatar_url': f"https://ui-avatars.com/api/?name={form.username.data}&background=random",
             'joined_at': datetime.now(timezone.utc),
@@ -716,7 +767,30 @@ def login():
                 {'email': email_regex}
             ]
         })
-        if user and check_password_hash(user['password'], form.password.data):
+        # Constant-time mitigation against timing attacks for nonexistent users
+        dummy_hash = 'scrypt:32768:8:1$dummy$dummyhashforaccountenumerationmitigation1234567890'
+        password_valid = False
+        if user and user.get('password'):
+            try:
+                password_valid = check_password_hash(user['password'], form.password.data)
+            except Exception:
+                password_valid = False
+        else:
+            try:
+                check_password_hash(dummy_hash, form.password.data)
+            except Exception:
+                pass
+
+        if user and password_valid:
+            # Seamlessly upgrade legacy/weaker hashes (e.g. pbkdf2) to scrypt on successful login
+            stored_pwd = user.get('password', '')
+            if not stored_pwd.startswith('scrypt:'):
+                try:
+                    new_hash = hash_password(form.password.data)
+                    users.update_one({'_id': user['_id']}, {'$set': {'password': new_hash}})
+                except Exception as ex:
+                    print(f"Warning: Failed to upgrade password hash for user {user['username']}: {ex}", flush=True)
+
             # Regenerate / clear previous session state to prevent session fixation
             session.clear()
             token_version = user.get('token_version', 1)
@@ -757,6 +831,7 @@ def reset_request():
     return render_template('reset_request.html', form=form)
 
 @app.route('/reset_password/<token>', methods=['GET', 'POST'])
+@limiter.limit("10 per hour", methods=["POST"])
 def reset_token(token):
     if 'user' in session:
         return redirect(url_for('index'))
@@ -766,8 +841,25 @@ def reset_token(token):
         return redirect(url_for('reset_request'))
     form = ResetPasswordForm()
     if form.validate_on_submit():
-        hash_pwd = generate_password_hash(form.password.data)
-        # Increment token_version to invalidate all existing sessions
+        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        now = datetime.now(timezone.utc)
+        # Atomic token consumption to guarantee single-use and prevent race conditions
+        consumed = password_reset_tokens.find_one_and_update(
+            {
+                'token_hash': token_hash,
+                'used': False,
+                'expires_at': {'$gt': now}
+            },
+            {
+                '$set': {'used': True, 'consumed_at': now}
+            }
+        )
+        if not consumed:
+            flash('That is an invalid or expired token', 'warning')
+            return redirect(url_for('reset_request'))
+
+        hash_pwd = hash_password(form.password.data)
+        # Atomically update password and increment token_version to invalidate all existing sessions
         users.update_one(
             {'_id': user_doc['_id']},
             {

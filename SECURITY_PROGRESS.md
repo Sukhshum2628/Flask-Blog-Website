@@ -16,8 +16,8 @@ This document tracks the incremental security hardening and remediation plan for
 | **PHASE 1** | SECRET_KEY & Session Security | Critical | **COMPLETED** | `50523ac` |
 | **PHASE 2** | Authentication & Authorization (IDOR, Job Ownership) | High | **COMPLETED** | `d6a4418` |
 | **PHASE 2.2** | Emergency Public Email Endpoint Lockdown (`/test_email`) | High | **COMPLETED** | `0465133` |
-| **PHASE 3** | CSRF Protection & Logout Method Correction | High | **COMPLETED** | 6d6c9f8 |
-| **PHASE 4** | Password & Password Reset Security | High | NOT STARTED | — |
+| **PHASE 3** | CSRF Protection & Logout Method Correction | High | **COMPLETED** | `7e19e5e` |
+| **PHASE 4** | Password & Password Reset Security | High | **COMPLETED** | ebfcf1 |
 | **PHASE 5** | Public Endpoint & Email Abuse Protection | High | NOT STARTED | — |
 | **PHASE 6** | AI API Security (Resource limits, SSE, POST chat) | High | NOT STARTED | — |
 | **PHASE 7** | Input Validation, XSS & NoSQL Injection Protection | High | NOT STARTED | — |
@@ -132,7 +132,7 @@ This document tracks the incremental security hardening and remediation plan for
 
 ### PHASE 3 — CSRF Protection & Logout Method Correction
 - **Status:** COMPLETED
-- **Git Commit:** 6d6c9f8
+- **Git Commit:** `7e19e5e`
 - **Files Created/Modified:**
   - `app.py`: Removed unjustified `@csrf.exempt` decorators from state-changing endpoints (`/api/save_progress/<post_id>`, `/ai/summarize/<post_id>`, `/ai/research`, `/ai/improve-draft`, `/api/bookmark/<post_id>`); added central `@app.errorhandler(CSRFError)` returning 400 JSON for API/AJAX callers and 400 HTML error page for standard form submissions; changed `/logout` from `GET` to `POST` with `@login_required` and CSRF validation.
   - `templates/csrf_error.html`: Dedicated, responsive error template explaining CSRF verification failure with navigation controls.
@@ -153,3 +153,24 @@ This document tracks the incremental security hardening and remediation plan for
 - **Tests Executed:**
   - `python -m pytest tests/test_csrf_security.py` -> 10 passed in 10.02s.
   - Full suite: `python -m pytest tests -v` -> 51 passed in 35.37s.
+
+---
+
+### PHASE 4 — Password & Password Reset Security
+- **Status:** COMPLETED
+- **Git Commit:** ebfcf1
+- **Files Created/Modified:**
+  - `app.py`: Upgraded password hashing algorithm to modern, memory-hard `scrypt` with salting; added automatic on-login hash migration from legacy algorithms (`pbkdf2`) to `scrypt`; enforced constant-time dummy hash verification during login for nonexistent users to mitigate timing attacks; implemented high-entropy single-use password reset tokens (`secrets.token_urlsafe(32)`) hashed with SHA-256 before storage in MongoDB `password_reset_tokens`; enforced atomic single-use token consumption via `find_one_and_update`; added trusted application URL binding (`get_trusted_reset_url`) using `APP_URL`/`BASE_URL` to defeat Host header poisoning; strengthened WTForms password length policy to min 8 and max 128 characters across registration, login, and reset; enforced server-side `EqualTo` password confirmation matching.
+  - `tests/test_password_security.py`: 20 comprehensive unit and integration tests covering password hashing, scrypt storage, timing attack defense, seamless hash upgrading, token entropy, SHA-256 hash storage, token expiry, atomic single-use replay prevention, password confirmation matching, uniform response on reset request, trusted URL generation, and session revocation.
+  - `SECURITY_PROGRESS.md`: Ledger update.
+- **Security Enhancements Implemented:**
+  - **Modern Password Hashing (`scrypt`):** Replaced legacy default PBKDF2 with memory-hard `scrypt:32768:8:1` algorithm for registration and password changes.
+  - **Seamless Hash Migration:** Existing user accounts hashed with legacy schemes continue to verify seamlessly with Werkzeug's `check_password_hash()`; upon successful authentication, their password hash is transparently upgraded to `scrypt` without forcing a password reset.
+  - **Timing-Attack Resistance:** If a login username or email does not exist in the database, `check_password_hash()` is executed against a dummy `scrypt` hash to equalize response times and prevent username enumeration via timing analysis.
+  - **Cryptographically Secure, Single-Use Reset Tokens:** Raw tokens generated via `secrets.token_urlsafe(32)` are never stored plaintext in MongoDB. Only their SHA-256 digests are stored in `password_reset_tokens`. Token verification verifies expiry, and execution atomically flips `used: True` via `find_one_and_update()` to prevent race conditions and replay attacks.
+  - **Host Header Poisoning Defense:** Password reset email links are bound to trusted application URLs (`APP_URL` or `BASE_URL`) rather than dynamically reflecting untrusted incoming HTTP `Host` headers.
+  - **Uniform Account Enumeration Defense:** Submitting `/reset_password` returns the exact same generic message and redirect whether or not the email address exists.
+  - **Session Invalidation:** Password resets atomically update password and increment `token_version`, instantly invalidating all existing user sessions across devices.
+- **Tests Executed:**
+  - `python -m pytest tests/test_password_security.py` -> 20 passed in 20.10s.
+  - Full suite: `python -m pytest tests -v` -> 71 passed in 46.70s.

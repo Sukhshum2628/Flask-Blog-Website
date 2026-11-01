@@ -5,12 +5,13 @@ from unittest.mock import patch
 import pytest
 from bson.objectid import ObjectId
 from werkzeug.security import generate_password_hash, check_password_hash
-from app import app, users, password_reset_tokens, get_reset_token, verify_reset_token, hash_password
+from app import app, users, password_reset_tokens, get_reset_token, verify_reset_token, hash_password, limiter
 
 @pytest.fixture
 def auth_client():
     app.config["TESTING"] = True
     app.config["WTF_CSRF_ENABLED"] = False
+    limiter.reset()
     return app.test_client()
 
 @pytest.fixture
@@ -308,23 +309,151 @@ def test_reset_request_returns_same_response_for_nonexistent_email(auth_client):
     login_page = auth_client.get('/login')
     assert b"An email has been sent with instructions to reset your password" in login_page.data
 
-def test_reset_email_dispatches_with_trusted_app_url(auth_client, test_user, monkeypatch):
-    """Reset URL is bound to trusted APP_URL / BASE_URL environment variable."""
+def test_reset_url_valid_https_app_url(auth_client, test_user, monkeypatch):
+    """1. Valid HTTPS APP_URL generates the correct reset link."""
     sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://flaskblog.security.io")
+    monkeypatch.delenv("BASE_URL", raising=False)
 
-    def mock_send(app_ctx, to_email, subject, body):
-        sent_emails.append({'to': to_email, 'subject': subject, 'body': body})
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]
 
-    monkeypatch.setattr("app.send_async_email", mock_send)
+def test_reset_url_valid_base_url_when_app_url_absent(auth_client, test_user, monkeypatch):
+    """2. Valid BASE_URL works when APP_URL is absent."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.delenv("APP_URL", raising=False)
+    monkeypatch.setenv("BASE_URL", "https://base.flaskblog.io")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://base.flaskblog.io/reset_password/" in sent_emails[0]
+
+def test_reset_url_production_without_origin_fails_closed(auth_client, test_user, monkeypatch):
+    """3. Production with neither variable configured fails closed (no email dispatched)."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.delenv("APP_URL", raising=False)
+    monkeypatch.delenv("BASE_URL", raising=False)
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    # Generic public response is preserved
+    assert resp.status_code == 302
+    # But email sending fails closed; no poisoned or unvalidated link is sent
+    assert len(sent_emails) == 0
+
+def test_reset_url_forged_host_header_cannot_influence_link(auth_client, test_user, monkeypatch):
+    """4. A forged Host header cannot influence the generated reset link."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
     monkeypatch.setenv("APP_URL", "https://flaskblog.security.io")
 
-    resp = auth_client.post('/reset_password', data={
-        'email': test_user['email']
-    }, follow_redirects=False)
+    resp = auth_client.post('/reset_password', 
+        data={'email': test_user['email']},
+        headers={'Host': 'attacker-evil-host.com'},
+        follow_redirects=False
+    )
     assert resp.status_code == 302
-
     assert len(sent_emails) == 1
-    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]['body']
+    assert "attacker-evil-host.com" not in sent_emails[0]
+    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]
+
+def test_reset_url_forged_x_forwarded_host_cannot_influence_link(auth_client, test_user, monkeypatch):
+    """5. A forged X-Forwarded-Host header cannot influence the generated reset link."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://flaskblog.security.io")
+
+    resp = auth_client.post('/reset_password', 
+        data={'email': test_user['email']},
+        headers={'X-Forwarded-Host': 'spoofed-domain.com'},
+        follow_redirects=False
+    )
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "spoofed-domain.com" not in sent_emails[0]
+    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]
+
+def test_reset_url_http_scheme_rejected_in_production(auth_client, test_user, monkeypatch):
+    """6. HTTP production URLs are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("APP_URL", "http://insecure-http-url.com")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    # Fails closed, no email sent
+    assert len(sent_emails) == 0
+
+def test_reset_url_embedded_credentials_rejected(auth_client, test_user, monkeypatch):
+    """7. URLs containing credentials are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://user:password@flaskblog.io")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_query_strings_or_fragments_rejected(auth_client, test_user, monkeypatch):
+    """8. URLs containing query strings or fragments are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    
+    # Query string test
+    monkeypatch.setenv("APP_URL", "https://flaskblog.io/path?query=1")
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+    # Fragment test
+    monkeypatch.setenv("APP_URL", "https://flaskblog.io/path#fragment")
+    resp2 = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp2.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_malformed_unsupported_scheme_rejected(auth_client, test_user, monkeypatch):
+    """9. Malformed or unsupported URLs are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "ftp://flaskblog.io")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_development_behavior_functional(auth_client, test_user, monkeypatch):
+    """10. Existing development behavior remains functional when unconfigured."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("APP_URL", raising=False)
+    monkeypatch.delenv("BASE_URL", raising=False)
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "/reset_password/" in sent_emails[0]
+
+def test_reset_url_render_production_overrides_test_flag(auth_client, test_user, monkeypatch):
+    """11. Production validation cannot be bypassed by test-related environment flags."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("APP_URL", "http://insecure-on-render.com")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    # Insecure HTTP on Render must fail closed despite TESTING=true
+    assert len(sent_emails) == 0
 
 
 # ---------------------------------------------------------------------------

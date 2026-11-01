@@ -17,7 +17,8 @@ This document tracks the incremental security hardening and remediation plan for
 | **PHASE 2** | Authentication & Authorization (IDOR, Job Ownership) | High | **COMPLETED** | `d6a4418` |
 | **PHASE 2.2** | Emergency Public Email Endpoint Lockdown (`/test_email`) | High | **COMPLETED** | `0465133` |
 | **PHASE 3** | CSRF Protection & Logout Method Correction | High | **COMPLETED** | `7e19e5e` |
-| **PHASE 4** | Password & Password Reset Security | High | **COMPLETED** | ebfcf1 |
+| **PHASE 4** | Password & Password Reset Security | High | **COMPLETED** | `ed378ef` |
+| **PHASE 4.1** | Trusted Password Reset URL Validation (F-01 Remediation) | High | **COMPLETED** | `5513a51` |
 | **PHASE 5** | Public Endpoint & Email Abuse Protection | High | NOT STARTED | — |
 | **PHASE 6** | AI API Security (Resource limits, SSE, POST chat) | High | NOT STARTED | — |
 | **PHASE 7** | Input Validation, XSS & NoSQL Injection Protection | High | NOT STARTED | — |
@@ -158,7 +159,7 @@ This document tracks the incremental security hardening and remediation plan for
 
 ### PHASE 4 — Password & Password Reset Security
 - **Status:** COMPLETED
-- **Git Commit:** ebfcf1
+- **Git Commit:** `ed378ef`
 - **Files Created/Modified:**
   - `app.py`: Upgraded password hashing algorithm to modern, memory-hard `scrypt` with salting; added automatic on-login hash migration from legacy algorithms (`pbkdf2`) to `scrypt`; enforced constant-time dummy hash verification during login for nonexistent users to mitigate timing attacks; implemented high-entropy single-use password reset tokens (`secrets.token_urlsafe(32)`) hashed with SHA-256 before storage in MongoDB `password_reset_tokens`; enforced atomic single-use token consumption via `find_one_and_update`; added trusted application URL binding (`get_trusted_reset_url`) using `APP_URL`/`BASE_URL` to defeat Host header poisoning; strengthened WTForms password length policy to min 8 and max 128 characters across registration, login, and reset; enforced server-side `EqualTo` password confirmation matching.
   - `tests/test_password_security.py`: 20 comprehensive unit and integration tests covering password hashing, scrypt storage, timing attack defense, seamless hash upgrading, token entropy, SHA-256 hash storage, token expiry, atomic single-use replay prevention, password confirmation matching, uniform response on reset request, trusted URL generation, and session revocation.
@@ -174,3 +175,20 @@ This document tracks the incremental security hardening and remediation plan for
 - **Tests Executed:**
   - `python -m pytest tests/test_password_security.py` -> 20 passed in 20.10s.
   - Full suite: `python -m pytest tests -v` -> 71 passed in 46.70s.
+
+---
+
+### PHASE 4.1 — Trusted Password Reset URL Validation (F-01 Remediation)
+- **Status:** COMPLETED
+- **Git Commit:** `5513a51`
+- **Files Created/Modified:**
+  - `app.py`: Implemented `validate_trusted_origin()` to validate `APP_URL` and `BASE_URL`; in production, strictly requires HTTPS, an absolute URL with scheme and host, rejects user credentials, query strings, and fragments; fails closed in production when unconfigured or invalid (neutralizing Host and X-Forwarded-Host header poisoning); safe development fallback when unconfigured in local environments; wrapped `send_reset_email()` in safe exception handling.
+  - `tests/test_password_security.py`: Expanded test suite with 11 focused URL-security tests covering valid HTTPS `APP_URL`, valid `BASE_URL`, production fail-closed behavior, forged `Host` header immunity, forged `X-Forwarded-Host` immunity, HTTP scheme rejection in production, user credential rejection, query string and fragment rejection, unsupported scheme rejection, development fallback, and Render production override over test flags.
+  - `SECURITY_PROGRESS.md`: Ledger update.
+- **Security Enhancements Implemented:**
+  - **Strict Production Origin Validation:** In production (`FLASK_ENV=production` or `RENDER=true`), `validate_trusted_origin()` strictly rejects non-HTTPS schemes, credentials, query strings, fragments, and missing origins.
+  - **Fail-Closed Reset Email Dispatch:** If `APP_URL` or `BASE_URL` is missing or invalid in production, `get_trusted_reset_url()` raises an exception, which is caught safely in `send_reset_email()` returning `False`. No email with an untrusted or forged hostname is ever dispatched.
+  - **Zero Host Header Poisoning Surface:** Password reset URLs never derive their hostname from HTTP `Host` or `X-Forwarded-Host` headers in production.
+- **Tests Executed:**
+  - `python -m pytest tests/test_password_security.py` -> 30 passed in 23.44s.
+  - Full suite: `python -m pytest tests -v` -> 81 passed in 65.71s.

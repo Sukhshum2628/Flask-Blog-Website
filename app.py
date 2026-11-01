@@ -12,6 +12,7 @@ from wtforms import StringField, PasswordField, TextAreaField, SubmitField, Sele
 from wtforms.validators import DataRequired, Length, Optional, EqualTo
 from werkzeug.security import generate_password_hash, check_password_hash
 import hashlib
+from urllib.parse import urlparse
 from bson.objectid import ObjectId
 import bleach
 from dotenv import load_dotenv
@@ -271,18 +272,76 @@ def hash_password(password):
     """Hash a password using modern scrypt algorithm with salt."""
     return generate_password_hash(password, method='scrypt')
 
+def validate_trusted_origin(raw_url, is_prod=False):
+    """Validate configured application origin to prevent Host header poisoning.
+    
+    In production, strictly requires HTTPS, an absolute URL with scheme and host,
+    no user credentials, and no query parameters or fragments.
+    In development, accepts valid HTTP or HTTPS URLs, or returns None if unconfigured.
+    """
+    if not raw_url or not isinstance(raw_url, str):
+        if is_prod:
+            raise ValueError("APP_URL or BASE_URL is required in production environments.")
+        return None
+        
+    raw = raw_url.strip()
+    if not raw:
+        if is_prod:
+            raise ValueError("APP_URL or BASE_URL cannot be empty in production.")
+        return None
+        
+    parsed = urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError("Invalid APP_URL / BASE_URL: Missing URL scheme or host.")
+        
+    scheme = parsed.scheme.lower()
+    if is_prod:
+        if scheme != 'https':
+            raise ValueError("Production APP_URL / BASE_URL must use HTTPS.")
+    elif scheme not in ('http', 'https'):
+        raise ValueError("APP_URL / BASE_URL scheme must be http or https.")
+        
+    if parsed.username or parsed.password:
+        raise ValueError("APP_URL / BASE_URL must not contain user credentials.")
+        
+    if parsed.query or parsed.fragment:
+        raise ValueError("APP_URL / BASE_URL must not contain query parameters or fragments.")
+        
+    if not parsed.hostname:
+        raise ValueError("Invalid APP_URL / BASE_URL: Invalid host.")
+        
+    clean_origin = f"{scheme}://{parsed.netloc}"
+    clean_path = parsed.path.rstrip('/')
+    return f"{clean_origin}{clean_path}"
+
 def get_trusted_reset_url(token):
-    """Generate password reset URL bound to trusted host to mitigate Host header poisoning."""
-    app_url = os.environ.get('APP_URL') or os.environ.get('BASE_URL')
-    if app_url:
-        return f"{app_url.rstrip('/')}{url_for('reset_token', token=token)}"
+    """Generate password reset URL bound to trusted host to mitigate Host header poisoning.
+    
+    Production strictly fails closed if no valid HTTPS application origin is configured.
+    Development falls back to request context if unconfigured.
+    """
+    is_prod = (os.environ.get("FLASK_ENV") == "production") or (os.environ.get("RENDER") == "true")
+    configured_origin = os.environ.get('APP_URL') or os.environ.get('BASE_URL')
+    
+    trusted_origin = validate_trusted_origin(configured_origin, is_prod=is_prod)
+    if trusted_origin:
+        return f"{trusted_origin}{url_for('reset_token', token=token)}"
+        
+    if is_prod:
+        raise ValueError("Production reset URL requires a validated HTTPS APP_URL or BASE_URL.")
+        
+    # Safe development fallback (never used in production)
     return url_for('reset_token', token=token, _external=True)
 
 def send_reset_email(user):
     print(f"Attempting to send reset email to: {user['email']}", flush=True)
-    token = get_reset_token(user['_id'])
-    reset_url = get_trusted_reset_url(token)
-    
+    try:
+        token = get_reset_token(user['_id'])
+        reset_url = get_trusted_reset_url(token)
+    except Exception as e:
+        print(f"ERROR: Failed to generate trusted reset URL for user {user.get('username')}: {e}", flush=True)
+        return False
+        
     subject = 'Password Reset Request'
     body = f'''To reset your password, visit the following link:
 {reset_url}
@@ -291,6 +350,7 @@ If you did not make this request then simply ignore this email and no changes wi
 '''
     # Send in background thread
     threading.Thread(target=send_async_email, args=(app, user['email'], subject, body)).start()
+    return True
 
 @app.route('/test_email')
 def test_email():

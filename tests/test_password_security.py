@@ -565,3 +565,175 @@ def test_password_reset_increments_token_version_and_invalidates_old_sessions(au
     res2 = auth_client.get('/dashboard', follow_redirects=False)
     assert res2.status_code == 302
     assert '/login' in res2.headers['Location']
+
+
+# ---------------------------------------------------------------------------
+# 7. Sibling Token Invalidation & Lifecycle (F-02)
+# ---------------------------------------------------------------------------
+
+def test_sibling_tokens_invalidated_after_successful_reset(auth_client, test_user):
+    """When a reset succeeds, all outstanding sibling tokens for the user are invalidated."""
+    token1 = get_reset_token(test_user['_id'])
+    token2 = get_reset_token(test_user['_id'])
+    token3 = get_reset_token(test_user['_id'])
+
+    # All three tokens exist and verify
+    assert verify_reset_token(token1) is not None
+    assert verify_reset_token(token2) is not None
+    assert verify_reset_token(token3) is not None
+
+    # Reset password using token1
+    new_pass = "BrandNewSecret123!"
+    resp = auth_client.post(f'/reset_password/{token1}', data={
+        'password': new_pass,
+        'confirm_password': new_pass
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/login'
+
+    # Token1 cannot be reused
+    assert verify_reset_token(token1) is None
+    reuse_resp = auth_client.post(f'/reset_password/{token1}', data={
+        'password': "AnotherPassword999!",
+        'confirm_password': "AnotherPassword999!"
+    }, follow_redirects=False)
+    assert reuse_resp.status_code == 302
+    assert reuse_resp.headers['Location'] == '/reset_password'
+
+    # Sibling tokens (token2 and token3) are now invalidated
+    assert verify_reset_token(token2) is None
+    assert verify_reset_token(token3) is None
+
+    # Attempting to reset with sibling token2 fails
+    resp2 = auth_client.post(f'/reset_password/{token2}', data={
+        'password': "AnotherPassword999!",
+        'confirm_password': "AnotherPassword999!"
+    }, follow_redirects=False)
+    assert resp2.status_code == 302
+    assert resp2.headers['Location'] == '/reset_password'
+
+    # Verify audit trail: sibling tokens marked used=True with reason
+    t2_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token2.encode('utf-8')).hexdigest()})
+    assert t2_doc['used'] is True
+    assert t2_doc['invalidated_reason'] == 'sibling_reset'
+
+def test_sibling_invalidation_does_not_affect_other_users(auth_client, test_user):
+    """Invalidating sibling tokens for user A does not affect tokens for user B."""
+    # Create user B
+    user_b_id = users.insert_one({
+        "username": "sibling_other_user",
+        "email": "sibling_other_user@example.com",
+        "password": hash_password("PasswordUserB123!"),
+        "token_version": 1
+    }).inserted_id
+
+    try:
+        user_a_token1 = get_reset_token(test_user['_id'])
+        user_a_token2 = get_reset_token(test_user['_id'])
+        user_b_token = get_reset_token(user_b_id)
+
+        # Reset using user A's token1
+        new_pass_a = "UserANewPassword123!"
+        resp = auth_client.post(f'/reset_password/{user_a_token1}', data={
+            'password': new_pass_a,
+            'confirm_password': new_pass_a
+        }, follow_redirects=False)
+        assert resp.status_code == 302
+
+        # User A's sibling token2 is invalidated
+        assert verify_reset_token(user_a_token2) is None
+
+        # User B's token remains completely valid and usable
+        assert verify_reset_token(user_b_token) is not None
+        new_pass_b = "UserBNewPassword999!"
+        resp_b = auth_client.post(f'/reset_password/{user_b_token}', data={
+            'password': new_pass_b,
+            'confirm_password': new_pass_b
+        }, follow_redirects=False)
+        assert resp_b.status_code == 302
+        assert resp_b.headers['Location'] == '/login'
+
+        # User B can now log in with new password
+        user_b_updated = users.find_one({'_id': user_b_id})
+        assert check_password_hash(user_b_updated['password'], new_pass_b)
+    finally:
+        users.delete_one({'_id': user_b_id})
+        password_reset_tokens.delete_many({'user_id': str(user_b_id)})
+
+def test_expired_sibling_token_remains_unusable(auth_client, test_user):
+    """An expired token remains unusable before and after sibling reset."""
+    raw_token = get_reset_token(test_user['_id'])
+    # Manually expire the token
+    token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    past_time = datetime.now(timezone.utc) - timedelta(hours=2)
+    password_reset_tokens.update_one({'token_hash': token_hash}, {'$set': {'expires_at': past_time}})
+
+    assert verify_reset_token(raw_token) is None
+    resp = auth_client.post(f'/reset_password/{raw_token}', data={
+        'password': 'SomeNewPassword123!',
+        'confirm_password': 'SomeNewPassword123!'
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+def test_invalid_token_does_not_change_password(auth_client, test_user):
+    """Non-existent token cannot reset password."""
+    resp = auth_client.post('/reset_password/non_existent_token_string_123', data={
+        'password': 'SomeNewPassword123!',
+        'confirm_password': 'SomeNewPassword123!'
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+    # Verify password unchanged
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(curr_user['password'], test_user['raw_pass'])
+
+def test_mismatched_password_confirmation_does_not_consume_token(auth_client, test_user):
+    """Form validation error (mismatched password) does not consume the token."""
+    token = get_reset_token(test_user['_id'])
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'ValidPassword123!',
+        'confirm_password': 'MismatchedPassword123!'
+    }, follow_redirects=False)
+    assert resp.status_code == 200 # Re-renders form
+
+    # Token must still be valid and unconsumed
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+    assert verify_reset_token(token) is not None
+
+def test_failed_password_validation_does_not_consume_token(auth_client, test_user):
+    """Form validation error (too short password) does not consume token."""
+    token = get_reset_token(test_user['_id'])
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'short',
+        'confirm_password': 'short'
+    }, follow_redirects=False)
+    assert resp.status_code == 200
+
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+    assert verify_reset_token(token) is not None
+
+def test_password_update_failure_reverts_token_consumption(auth_client, test_user, monkeypatch):
+    """If database fails during password update, token consumption is reverted so user is not locked out."""
+    token = get_reset_token(test_user['_id'])
+
+    def fail_update(*args, **kwargs):
+        raise RuntimeError("Simulated database write error during password update")
+
+    monkeypatch.setattr(users, "update_one", fail_update)
+
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'NewPassword123!',
+        'confirm_password': 'NewPassword123!'
+    }, follow_redirects=False)
+
+    # User redirected back to reset_token page to retry
+    assert resp.status_code == 302
+    assert f'/reset_password/{token}' in resp.headers['Location']
+
+    # Token must NOT be permanently marked used
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False

@@ -927,14 +927,35 @@ def reset_token(token):
             return redirect(url_for('reset_request'))
 
         hash_pwd = hash_password(form.password.data)
-        # Atomically update password and increment token_version to invalidate all existing sessions
-        users.update_one(
-            {'_id': user_doc['_id']},
+        try:
+            # Atomically update password and increment token_version to invalidate all existing sessions
+            users.update_one(
+                {'_id': user_doc['_id']},
+                {
+                    '$set': {'password': hash_pwd},
+                    '$inc': {'token_version': 1}
+                }
+            )
+        except Exception as e:
+            # Revert token consumption if password update failed so user is not locked out
+            password_reset_tokens.update_one(
+                {'_id': consumed['_id'], 'used': True},
+                {'$set': {'used': False}, '$unset': {'consumed_at': ''}}
+            )
+            flash('An error occurred while updating your password. Please try again.', 'danger')
+            return redirect(url_for('reset_token', token=token))
+
+        # Invalidate all outstanding sibling reset tokens for this user
+        password_reset_tokens.update_many(
             {
-                '$set': {'password': hash_pwd},
-                '$inc': {'token_version': 1}
+                'user_id': str(user_doc['_id']),
+                'used': False
+            },
+            {
+                '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
             }
         )
+
         session.clear()
         flash('Your password has been updated! You are now able to log in', 'success')
         return redirect(url_for('login'))

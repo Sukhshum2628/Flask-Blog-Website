@@ -911,50 +911,61 @@ def reset_token(token):
     if form.validate_on_submit():
         token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
         now = datetime.now(timezone.utc)
-        # Atomic token consumption to guarantee single-use and prevent race conditions
-        consumed = password_reset_tokens.find_one_and_update(
-            {
-                'token_hash': token_hash,
-                'used': False,
-                'expires_at': {'$gt': now}
-            },
-            {
-                '$set': {'used': True, 'consumed_at': now}
-            }
-        )
-        if not consumed:
+        hash_pwd = hash_password(form.password.data)
+        client = mongo.cx
+
+        try:
+            with client.start_session() as db_session:
+                with db_session.start_transaction():
+                    # 1. Atomically consume the submitted token inside the transaction
+                    consumed = password_reset_tokens.find_one_and_update(
+                        {
+                            'token_hash': token_hash,
+                            'used': False,
+                            'expires_at': {'$gt': now}
+                        },
+                        {
+                            '$set': {'used': True, 'consumed_at': now}
+                        },
+                        session=db_session
+                    )
+                    if not consumed:
+                        raise ValueError("Invalid, expired, or already consumed token.")
+
+                    # 2. Acquire user document and verify token_version for concurrency conflict protection
+                    # Locking/conditional write on token_version ensures that if another concurrent request
+                    # committed a reset, this transaction will abort on write conflict or matched_count == 0
+                    current_token_version = user_doc.get('token_version', 1)
+                    update_result = users.update_one(
+                        {
+                            '_id': user_doc['_id'],
+                            'token_version': current_token_version
+                        },
+                        {
+                            '$set': {'password': hash_pwd},
+                            '$inc': {'token_version': 1}
+                        },
+                        session=db_session
+                    )
+                    if update_result.matched_count == 0:
+                        raise ValueError("Concurrent password reset detected. Aborting transaction.")
+
+                    # 3. Invalidate all remaining sibling reset tokens for this user inside the transaction
+                    password_reset_tokens.update_many(
+                        {
+                            'user_id': str(user_doc['_id']),
+                            'used': False
+                        },
+                        {
+                            '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
+                        },
+                        session=db_session
+                    )
+
+        except Exception as e:
+            print(f"Password reset transaction failed/aborted: {e}", flush=True)
             flash('That is an invalid or expired token', 'warning')
             return redirect(url_for('reset_request'))
-
-        hash_pwd = hash_password(form.password.data)
-        try:
-            # Atomically update password and increment token_version to invalidate all existing sessions
-            users.update_one(
-                {'_id': user_doc['_id']},
-                {
-                    '$set': {'password': hash_pwd},
-                    '$inc': {'token_version': 1}
-                }
-            )
-        except Exception as e:
-            # Revert token consumption if password update failed so user is not locked out
-            password_reset_tokens.update_one(
-                {'_id': consumed['_id'], 'used': True},
-                {'$set': {'used': False}, '$unset': {'consumed_at': ''}}
-            )
-            flash('An error occurred while updating your password. Please try again.', 'danger')
-            return redirect(url_for('reset_token', token=token))
-
-        # Invalidate all outstanding sibling reset tokens for this user
-        password_reset_tokens.update_many(
-            {
-                'user_id': str(user_doc['_id']),
-                'used': False
-            },
-            {
-                '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
-            }
-        )
 
         session.clear()
         flash('Your password has been updated! You are now able to log in', 'success')

@@ -716,10 +716,11 @@ def test_failed_password_validation_does_not_consume_token(auth_client, test_use
     assert token_doc['used'] is False
     assert verify_reset_token(token) is not None
 
-def test_password_update_failure_reverts_token_consumption(auth_client, test_user, monkeypatch):
-    """If database fails during password update, token consumption is reverted so user is not locked out."""
+def test_password_update_failure_aborts_transaction(auth_client, test_user, monkeypatch):
+    """If database fails during password update, transaction aborts: token remains unconsumed, password unchanged."""
     token = get_reset_token(test_user['_id'])
 
+    orig_update_one = users.update_one
     def fail_update(*args, **kwargs):
         raise RuntimeError("Simulated database write error during password update")
 
@@ -730,10 +731,79 @@ def test_password_update_failure_reverts_token_consumption(auth_client, test_use
         'confirm_password': 'NewPassword123!'
     }, follow_redirects=False)
 
-    # User redirected back to reset_token page to retry
+    # User redirected back to reset_request due to transaction abort
     assert resp.status_code == 302
-    assert f'/reset_password/{token}' in resp.headers['Location']
+    assert resp.headers['Location'] == '/reset_password'
 
-    # Token must NOT be permanently marked used
+    # Token must NOT be consumed in DB (transaction rollback)
     token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
     assert token_doc['used'] is False
+
+    # Password must remain unchanged
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(curr_user['password'], test_user['raw_pass'])
+
+def test_sibling_invalidation_failure_aborts_entire_transaction(auth_client, test_user, monkeypatch):
+    """If sibling invalidation fails, entire transaction aborts: token unconsumed, password unchanged."""
+    token = get_reset_token(test_user['_id'])
+    sibling_token = get_reset_token(test_user['_id'])
+
+    def fail_update_many(*args, **kwargs):
+        raise RuntimeError("Simulated database failure during sibling invalidation")
+
+    monkeypatch.setattr(password_reset_tokens, "update_many", fail_update_many)
+
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'NewPassword123!',
+        'confirm_password': 'NewPassword123!'
+    }, follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+    # Submitted token remained unconsumed
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+
+    # Sibling token remained unconsumed
+    sib_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(sibling_token.encode('utf-8')).hexdigest()})
+    assert sib_doc['used'] is False
+
+    # User password unchanged and token_version unchanged
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert curr_user['token_version'] == 1
+    assert check_password_hash(curr_user['password'], test_user['raw_pass'])
+
+def test_concurrent_sibling_token_resets_prevented(auth_client, test_user):
+    """Two concurrent requests using different sibling tokens cannot both succeed.
+    
+    When one transaction commits and increments token_version, the other request's 
+    transaction detects the version change (matched_count == 0) and aborts cleanly.
+    """
+    token1 = get_reset_token(test_user['_id'])
+    token2 = get_reset_token(test_user['_id'])
+
+    # Request 1 resets password with token1
+    resp1 = auth_client.post(f'/reset_password/{token1}', data={
+        'password': 'WinnerPassword123!',
+        'confirm_password': 'WinnerPassword123!'
+    }, follow_redirects=False)
+    assert resp1.status_code == 302
+    assert resp1.headers['Location'] == '/login'
+
+    # Request 2 (losing or simultaneous sibling request) attempts reset with token2
+    resp2 = auth_client.post(f'/reset_password/{token2}', data={
+        'password': 'LosingPassword123!',
+        'confirm_password': 'LosingPassword123!'
+    }, follow_redirects=False)
+    assert resp2.status_code == 302
+    assert resp2.headers['Location'] == '/reset_password'
+
+    # Verify winning password is set, losing password is NOT set
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(curr_user['password'], 'WinnerPassword123!')
+    assert not check_password_hash(curr_user['password'], 'LosingPassword123!')
+
+    # Both tokens are now unusable
+    assert verify_reset_token(token1) is None
+    assert verify_reset_token(token2) is None

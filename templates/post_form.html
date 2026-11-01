@@ -232,9 +232,13 @@
         content.innerHTML = '<div class="text-center mt-5"><div class="spinner-border text-success"></div><p class="mt-2 text-muted small">AI is researching ammunition...</p></div>';
         
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
             const resp = await fetch('/ai/research', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
                 body: JSON.stringify({ topic: query, draft: draftContent })
             });
             const { job_id } = await resp.json();
@@ -326,9 +330,13 @@
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Improving...';
 
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
             const response = await fetch('/ai/improve-draft', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
                 body: JSON.stringify({ draft: draftContent })
             });
             const data = await response.json();

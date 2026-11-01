@@ -7,6 +7,7 @@
     <title>{% block title %}FlaskBlog — Read & Write Stories{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}FlaskBlog is a modern publishing platform for reading and writing stories, with AI-assisted summaries and research.{% endblock %}">
     <link rel="canonical" href="{% block canonical %}{{ request.base_url }}{% endblock %}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="robots" content="{% block robots %}index, follow{% endblock %}">
 
     <!-- Open Graph -->
@@ -143,7 +144,12 @@
                                 <li><a class="dropdown-item py-2" href="{{ url_for('dashboard') }}">Library</a></li>
                                 <li><a class="dropdown-item py-2" href="{{ url_for('settings') }}">Settings</a></li>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item py-2 text-danger" href="{{ url_for('logout') }}">Sign out</a></li>
+                                <li>
+                                    <form action="{{ url_for('logout') }}" method="POST" class="d-inline w-100 m-0 p-0">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="dropdown-item py-2 text-danger border-0 bg-transparent w-100 text-start">Sign out</button>
+                                    </form>
+                                </li>
                             </ul>
                         </li>
                     {% else %}
@@ -191,8 +197,14 @@
             e.preventDefault();
             const postId = btn.dataset.id;
             
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
             try {
-                const response = await fetch(`/api/bookmark/${postId}`, { method: 'POST' });
+                const response = await fetch(`/api/bookmark/${postId}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken
+                    }
+                });
                 const data = await response.json();
                 
                 if (data.status === 'added') {

@@ -61,7 +61,13 @@ document.querySelectorAll('.toggle-bookmark').forEach(btn => {
     btn.addEventListener('click', async function() {
         const postId = this.dataset.id;
         try {
-            const resp = await fetch(`/api/bookmark/${postId}`, { method: 'POST' });
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            const resp = await fetch(`/api/bookmark/${postId}`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
             const data = await resp.json();
             if (data.status === 'removed') {
                 this.closest('.card').remove();

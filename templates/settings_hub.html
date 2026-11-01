@@ -30,7 +30,10 @@
         </div>
         
         <div class="mt-4 text-center">
-            <a href="{{ url_for('logout') }}" class="text-danger text-decoration-none small fw-bold">Sign Out</a>
+            <form action="{{ url_for('logout') }}" method="POST" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-link text-danger text-decoration-none small fw-bold p-0 border-0 align-baseline">Sign Out</button>
+            </form>
         </div>
     </div>
 </div>

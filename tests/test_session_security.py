@@ -131,8 +131,8 @@ def test_authenticated_session_lifecycle(client):
     res = client.get('/dashboard')
     assert res.status_code == 200
 
-    # 3. Logout
-    res_logout = client.get('/logout', follow_redirects=False)
+    # 3. Logout (POST required)
+    res_logout = client.post('/logout', follow_redirects=False)
     assert res_logout.status_code == 302
 
     # 4. Access protected route after logout -> rejected

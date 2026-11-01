@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+
+{% block title %}CSRF Verification Failed — FlaskBlog{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 text-center">
+        <div class="card border-0 shadow-sm p-4">
+            <div class="card-body">
+                <i class="bi bi-shield-exclamation text-danger mb-3" style="font-size: 3rem;"></i>
+                <h3 class="fw-bold mb-2">Request Security Check Failed</h3>
+                <p class="text-muted mb-4">
+                    Your session or security token could not be verified (CSRF validation failure). 
+                    Please return to the previous page, refresh your browser, and try again.
+                </p>
+                <div class="d-flex justify-content-center gap-2">
+                    <a href="javascript:history.back()" class="btn btn-outline-secondary rounded-pill px-4">Go Back</a>
+                    <a href="{{ url_for('index') }}" class="btn btn-black rounded-pill px-4">Home</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

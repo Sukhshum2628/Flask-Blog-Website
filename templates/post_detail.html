@@ -391,10 +391,12 @@
         localStorage.setItem(storageKey, winScroll);
         
         // Save to server
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         fetch(`/api/save_progress/${postId}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
             },
             body: JSON.stringify({ progress: winScroll })
         });
@@ -438,7 +440,13 @@
         });
         
         try {
-            const response = await fetch(`/ai/summarize/${postId}`, { method: 'POST' });
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            const response = await fetch(`/ai/summarize/${postId}`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
             const data = await response.json();
             
             if (data.summary && Array.isArray(data.summary) && data.summary.length > 0) {

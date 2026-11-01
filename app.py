@@ -57,9 +57,16 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "true" if IS_PRODUCTION else "false").lower() == "true"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 
-# CSRF protection for all form POSTs. JSON/SSE fetch endpoints (called by JS
-# without a token) are individually exempted with @csrf.exempt below.
+from flask_wtf.csrf import CSRFProtect, CSRFError
+
+# Global CSRF protection for all browser state-changing requests (forms and AJAX).
 csrf = CSRFProtect(app)
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    if request.is_json or request.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'error': 'CSRF Error', 'message': e.description}), 400
+    return render_template('csrf_error.html', reason=e.description), 400
 
 mongo = PyMongo(app)
 users = mongo.db.users
@@ -340,7 +347,6 @@ def ping():
     return {'status': 'ok'}, 200
 
 @app.route('/api/save_progress/<post_id>', methods=['POST'])
-@csrf.exempt
 def save_progress(post_id):
     if not g.get('current_user') or 'user' not in session:
         return {'status': 'ignored'}, 200
@@ -774,7 +780,8 @@ def reset_token(token):
         return redirect(url_for('login'))
     return render_template('reset_token.html', form=form)
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
+@login_required
 def logout():
     session.clear()
     flash('Logged out.', 'info')
@@ -968,7 +975,6 @@ def bookmark_post(post_id):
 
 # AI Routes
 @app.route('/ai/summarize/<post_id>', methods=['POST'])
-@csrf.exempt
 @limiter.limit("30 per hour")
 def ai_summarize(post_id):
     try:
@@ -1052,7 +1058,6 @@ def ai_chat_stream(post_id):
     return Response(ai_service.stream_answer(clean_text, question), mimetype='text/event-stream')
 
 @app.route('/ai/research', methods=['POST'])
-@csrf.exempt
 @limiter.limit("20 per hour")
 @login_required
 def ai_research():
@@ -1123,7 +1128,6 @@ def get_job_status(job_id):
     })
 
 @app.route('/ai/improve-draft', methods=['POST'])
-@csrf.exempt
 @limiter.limit("30 per hour")
 def ai_improve_draft():
     if 'user' not in session:
@@ -1369,7 +1373,6 @@ def settings_account():
 
 @app.route('/api/bookmark/<post_id>', methods=['POST'])
 @limiter.limit("10 per minute")
-@csrf.exempt
 @login_required
 def toggle_bookmark(post_id):
     obj_id = get_valid_object_id(post_id)

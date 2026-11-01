@@ -310,6 +310,14 @@ def validate_trusted_origin(raw_url, is_prod=False):
     if not parsed.hostname:
         raise ValueError("Invalid APP_URL / BASE_URL: Invalid host.")
         
+    try:
+        port = parsed.port
+    except ValueError as e:
+        raise ValueError(f"Invalid APP_URL / BASE_URL: Invalid port ({e}).")
+        
+    if port is not None and not (1 <= port <= 65535):
+        raise ValueError("Invalid APP_URL / BASE_URL: Port must be between 1 and 65535.")
+        
     clean_origin = f"{scheme}://{parsed.netloc}"
     clean_path = parsed.path.rstrip('/')
     return f"{clean_origin}{clean_path}"

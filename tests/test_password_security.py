@@ -455,6 +455,82 @@ def test_reset_url_render_production_overrides_test_flag(auth_client, test_user,
     # Insecure HTTP on Render must fail closed despite TESTING=true
     assert len(sent_emails) == 0
 
+def test_reset_url_non_integer_port_rejected(auth_client, test_user, monkeypatch):
+    """12. Origins with non-integer ports (e.g. :abc) are rejected and fail closed."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:abc")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_out_of_range_port_rejected(auth_client, test_user, monkeypatch):
+    """13. Origins with out-of-range ports (e.g. :70000) are rejected and fail closed."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:70000")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_port_zero_rejected(auth_client, test_user, monkeypatch):
+    """14. Port 0 is explicitly rejected and fails closed."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:0")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_valid_https_port_accepted(auth_client, test_user, monkeypatch):
+    """15. A valid HTTPS port is accepted and included in reset link."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:8443")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://example.com:8443/reset_password/" in sent_emails[0]
+
+def test_reset_url_valid_ipv4_with_port_preserved(auth_client, test_user, monkeypatch):
+    """16. A valid IPv4 origin with a port is accepted and preserved in development."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("APP_URL", "http://127.0.0.1:5000")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "http://127.0.0.1:5000/reset_password/" in sent_emails[0]
+
+def test_reset_url_valid_bracketed_ipv6_preserved(auth_client, test_user, monkeypatch):
+    """17. A valid bracketed IPv6 origin (with port) is preserved."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://[::1]:8443")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://[::1]:8443/reset_password/" in sent_emails[0]
+
+def test_reset_url_invalid_production_port_fails_closed(auth_client, test_user, monkeypatch):
+    """18. Invalid production port configuration strictly fails closed and sends no email."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("APP_URL", "https://prod.flaskblog.io:badport")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
 
 # ---------------------------------------------------------------------------
 # 6. Session Invalidation on Password Reset

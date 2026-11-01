@@ -335,14 +335,18 @@ def ping():
 @app.route('/api/save_progress/<post_id>', methods=['POST'])
 @csrf.exempt
 def save_progress(post_id):
-    if 'user' not in session:
+    if not g.get('current_user') or 'user' not in session:
         return {'status': 'ignored'}, 200
     
-    data = request.get_json()
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        return jsonify({'error': 'Invalid post ID'}), 400
+    
+    data = request.get_json() or {}
     progress = data.get('progress', 0)
     
     reading_history.update_one(
-        {'user': session['user'], 'post_id': ObjectId(post_id)},
+        {'user': session['user'], 'post_id': obj_id},
         {'$set': {'progress': progress, 'updated_at': datetime.now(timezone.utc)}},
         upsert=True
     )
@@ -392,6 +396,25 @@ def time_ago_filter(dt):
         return f"{int(seconds // 3600)}h ago"
     else:
         return f"{int(seconds // 86400)}d ago"
+
+from functools import wraps
+from bson.errors import InvalidId
+
+def get_valid_object_id(oid_str):
+    try:
+        return ObjectId(oid_str)
+    except (InvalidId, TypeError, ValueError):
+        return None
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not g.get('current_user') or 'user' not in session:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Unauthorized', 'message': 'Authentication required'}), 401
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Helpers
 def get_reading_time(text):
@@ -752,9 +775,8 @@ def logout():
 
 @app.route('/post/new', methods=['GET', 'POST'])
 @limiter.limit("30 per hour", methods=["POST"])
+@login_required
 def new_post():
-    if 'user' not in session:
-        return redirect(url_for('login'))
     
     form = PostForm()
     if form.validate_on_submit():
@@ -798,22 +820,26 @@ def new_post():
 @app.route('/post/<post_id>', methods=['GET', 'POST'])
 @cache.cached(timeout=60, unless=lambda: 'user' in session or request.method == 'POST')
 def view_post(post_id):
-    post = posts.find_one({'_id': ObjectId(post_id)})
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        abort(404)
+        
+    post = posts.find_one({'_id': obj_id})
     if not post:
         abort(404)
 
+    # Draft access control: only author can view drafts
+    if post.get('is_draft'):
+        if not g.get('current_user') or 'user' not in session or session['user'] != post['author']:
+            abort(403)
+
     # Increment View Count (Lightweight Analytics)
-    # Use $inc for atomic update. Check cookie or session to prevent spam? 
-    # For now, simple increment per page load.
-    posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'views': 1}})
+    posts.update_one({'_id': obj_id}, {'$inc': {'views': 1}})
     
     # Get Author details
     author = users.find_one({'username': post['author']})
     
-    # Access Control for Drafts
-    if post.get('is_draft'):
-        if 'user' not in session or session['user'] != post['author']:
-            abort(403) # Forbidden
+    # Access Control for Drafts (enforced at route entry)
     
     # Comments - sorted by pinned first, then new
     post_comments = list(comments.find({'post_id': ObjectId(post_id)}).sort([("is_pinned", -1), ("created_at", -1)]))
@@ -915,11 +941,13 @@ def view_post(post_id):
     return render_template('post_detail.html', post=post, author=author, comments=post_comments, form=form, read_time=read_time, is_author=is_author, user_reaction=user_reaction, reaction_counts=reaction_counts, is_bookmarked=is_bookmarked, active_readers=active_readers, series_prev=series_prev, series_next=series_next, server_progress=server_progress, related_posts=related_posts)
 
 @app.route('/post/<post_id>/bookmark', methods=['POST'])
+@login_required
 def bookmark_post(post_id):
-    if 'user' not in session:
-        return redirect(url_for('login'))
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        abort(404)
         
-    user = users.find_one({'username': session['user']})
+    user = g.get('current_user') or users.find_one({'username': session['user']})
     saved = user.get('bookmarks', [])
     
     if post_id in saved:
@@ -937,9 +965,18 @@ def bookmark_post(post_id):
 @limiter.limit("30 per hour")
 def ai_summarize(post_id):
     try:
-        post = posts.find_one({'_id': ObjectId(post_id)})
+        obj_id = get_valid_object_id(post_id)
+        if not obj_id:
+            return jsonify({'error': 'Invalid post ID'}), 400
+            
+        post = posts.find_one({'_id': obj_id})
         if not post:
             return jsonify({'error': 'Post not found'}), 404
+            
+        # Do not allow AI summarization of someone else's draft
+        if post.get('is_draft'):
+            if not g.get('current_user') or 'user' not in session or session['user'] != post['author']:
+                return jsonify({'error': 'Unauthorized'}), 403
             
         # 1. Check Cache
         if 'summary_cache' in post:
@@ -989,9 +1026,17 @@ def ai_chat_stream(post_id):
     if not question:
         return "data: [ERROR] Question required\n\n", 400
     
-    post = posts.find_one({'_id': ObjectId(post_id)})
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        return "data: [ERROR] Invalid post ID\n\n", 400
+        
+    post = posts.find_one({'_id': obj_id})
     if not post:
         return "data: [ERROR] Post not found\n\n", 404
+        
+    if post.get('is_draft'):
+        if not g.get('current_user') or 'user' not in session or session['user'] != post['author']:
+            return "data: [ERROR] Unauthorized\n\n", 403
 
     soup = BeautifulSoup(post.get('content', ''), 'html.parser')
     clean_text = soup.get_text()
@@ -1002,21 +1047,25 @@ def ai_chat_stream(post_id):
 @app.route('/ai/research', methods=['POST'])
 @csrf.exempt
 @limiter.limit("20 per hour")
+@login_required
 def ai_research():
-    if 'user' not in session:
-        return {'error': 'Unauthorized'}, 401
-    
-    data = request.get_json()
+    data = request.get_json() or {}
     topic = data.get('topic')
     draft = data.get('draft', '')
     
     if not topic:
         return {'error': 'Topic required'}, 400
     
+    user_doc = g.get('current_user')
+    user_id = user_doc['_id'] if user_doc else None
+    username = session.get('user')
+    
     job_id = str(uuid.uuid4())
     # TTL Index in MongoDB handles cleanup
     mongo.db.jobs.insert_one({
         'job_id': job_id,
+        'user_id': user_id,
+        'username': username,
         'status': 'pending',
         'created_at': datetime.now(timezone.utc)
     })
@@ -1036,10 +1085,30 @@ def ai_research():
     return jsonify({'job_id': job_id})
 
 @app.route('/api/job/<job_id>')
+@login_required
 def get_job_status(job_id):
+    user_doc = g.get('current_user')
+    user_id = user_doc['_id'] if user_doc else None
+    username = session.get('user')
+    
+    # Query with strict ownership verification
     job = mongo.db.jobs.find_one({'job_id': job_id})
     if not job:
         return jsonify({'error': 'Job not found'}), 404
+        
+    # Legacy jobs without owner metadata are rejected to prevent unauthorized exposure
+    job_owner_id = job.get('user_id')
+    job_username = job.get('username')
+    
+    is_owner = False
+    if job_owner_id is not None and user_id is not None and job_owner_id == user_id:
+        is_owner = True
+    elif job_username is not None and username is not None and job_username == username:
+        is_owner = True
+        
+    if not is_owner:
+        return jsonify({'error': 'Forbidden', 'message': 'You do not have access to this job'}), 403
+        
     return jsonify({
         'status': job['status'],
         'result': job.get('result'),
@@ -1069,11 +1138,13 @@ def ai_improve_draft():
 
 @app.route('/post/<post_id>/edit', methods=['GET', 'POST'])
 @limiter.limit("60 per hour", methods=["POST"])
+@login_required
 def edit_post(post_id):
-    if 'user' not in session:
-        return redirect(url_for('login'))
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        abort(404)
         
-    post = posts.find_one({'_id': ObjectId(post_id)})
+    post = posts.find_one({'_id': obj_id})
     if not post:
         abort(404)
     if post['author'] != session['user']:
@@ -1131,26 +1202,31 @@ def edit_post(post_id):
     return render_template('post_form.html', form=form, legend="Edit Story")
 
 @app.route('/post/<post_id>/delete', methods=['POST'])
+@login_required
 def delete_post(post_id):
-    if 'user' not in session:
-        return redirect(url_for('login'))
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        abort(404)
         
-    post = posts.find_one({'_id': ObjectId(post_id)})
-    if post and post['author'] == session['user']:
-        posts.delete_one({'_id': ObjectId(post_id)})
-        # Delete associated comments
-        comments.delete_many({'post_id': ObjectId(post_id)})
-        flash('Story deleted.', 'success')
-    else:
-        flash('Unauthorized.', 'danger')
+    post = posts.find_one({'_id': obj_id})
+    if not post:
+        abort(404)
         
+    if post['author'] != session['user']:
+        abort(403)
+        
+    posts.delete_one({'_id': obj_id})
+    comments.delete_many({'post_id': obj_id})
+    flash('Story deleted.', 'success')
     return redirect(url_for('dashboard'))
 
 @app.route('/post/<post_id>/react/<reaction_type>', methods=['POST'])
 @limiter.limit("60 per minute")
+@login_required
 def react_post(post_id, reaction_type):
-    if 'user' not in session:
-        return redirect(url_for('login'))
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        abort(404)
         
     allowed_reactions = ['like', 'love', 'insightful', 'funny']
     if reaction_type not in allowed_reactions:
@@ -1175,28 +1251,31 @@ def react_post(post_id, reaction_type):
 
 @app.route('/comment/<comment_id>/pin', methods=['POST'])
 @limiter.limit("30 per minute")
+@login_required
 def pin_comment(comment_id):
-    if 'user' not in session:
-        return redirect(url_for('login'))
+    c_obj_id = get_valid_object_id(comment_id)
+    if not c_obj_id:
+        abort(404)
         
-    comment = comments.find_one({'_id': ObjectId(comment_id)})
+    comment = comments.find_one({'_id': c_obj_id})
     if not comment:
         abort(404)
         
     post = posts.find_one({'_id': comment['post_id']})
-    if not post or post['author'] != session['user']:
+    if not post:
+        abort(404)
+        
+    if post['author'] != session['user']:
         abort(403) # Only post author can pin
         
-    # Toggle pin
     new_state = not comment.get('is_pinned', False)
-    comments.update_one({'_id': ObjectId(comment_id)}, {'$set': {'is_pinned': new_state}})
+    comments.update_one({'_id': c_obj_id}, {'$set': {'is_pinned': new_state}})
     
     return redirect(url_for('view_post', post_id=post['_id']))
 
 @app.route('/dashboard')
+@login_required
 def dashboard():
-    if 'user' not in session:
-        return redirect(url_for('login'))
         
     section = request.args.get('section', 'stories')
     
@@ -1238,20 +1317,18 @@ def profile(username):
     return render_template('profile.html', user=user, posts=user_posts, activities=user_activities, total_likes=total_likes, total_stories=total_stories)
 
 @app.route('/settings')
+@login_required
 def settings():
-    if 'user' not in session:
-        return redirect(url_for('login'))
     return render_template('settings_hub.html')
 
 @app.route('/settings/profile', methods=['GET', 'POST'])
+@login_required
 def settings_profile():
-    if 'user' not in session:
-        return redirect(url_for('login'))
-        
-    user = users.find_one({'username': session['user']})
+    user = g.get('current_user') or users.find_one({'username': session['user']})
     form = SettingsProfileForm()
     
     if form.validate_on_submit():
+        # Whitelisted fields only - prevents mass assignment / privilege escalation
         users.update_one({'username': session['user']}, {'$set': {
             'bio': form.bio.data,
             'avatar_url': form.avatar_url.data
@@ -1266,11 +1343,9 @@ def settings_profile():
     return render_template('settings_profile.html', form=form, user=user)
 
 @app.route('/settings/account', methods=['GET', 'POST'])
+@login_required
 def settings_account():
-    if 'user' not in session:
-        return redirect(url_for('login'))
-        
-    user = users.find_one({'username': session['user']})
+    user = g.get('current_user') or users.find_one({'username': session['user']})
     form = SettingsAccountForm()
     
     if form.validate_on_submit():
@@ -1288,11 +1363,13 @@ def settings_account():
 @app.route('/api/bookmark/<post_id>', methods=['POST'])
 @limiter.limit("10 per minute")
 @csrf.exempt
+@login_required
 def toggle_bookmark(post_id):
-    if 'user' not in session:
-        return jsonify({'error': 'Login required'}), 401
-    
-    user = users.find_one({'username': session['user']})
+    obj_id = get_valid_object_id(post_id)
+    if not obj_id:
+        return jsonify({'error': 'Invalid post ID'}), 400
+        
+    user = g.get('current_user') or users.find_one({'username': session['user']})
     bookmarks = user.get('bookmarks', [])
     
     if post_id in bookmarks:
@@ -1303,17 +1380,14 @@ def toggle_bookmark(post_id):
         return jsonify({'status': 'added'})
 
 @app.route('/reading-list')
+@login_required
 def reading_list():
-    if 'user' not in session:
-        return redirect(url_for('login'))
-        
-    user = users.find_one({'username': session['user']})
+    user = g.get('current_user') or users.find_one({'username': session['user']})
     bookmark_ids = user.get('bookmarks', [])
     
     bookmarked_posts = []
     if bookmark_ids:
-        # Convert string IDs to ObjectIDs
-        obj_ids = [ObjectId(bid) for bid in bookmark_ids]
+        obj_ids = [get_valid_object_id(bid) for bid in bookmark_ids if get_valid_object_id(bid)]
         bookmarked_posts = list(posts.find({'_id': {'$in': obj_ids}, 'is_draft': {'$ne': True}}))
         
         for post in bookmarked_posts:

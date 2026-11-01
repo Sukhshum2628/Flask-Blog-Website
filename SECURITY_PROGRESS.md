@@ -83,3 +83,30 @@ This document tracks the incremental security hardening and remediation plan for
 - **Tests Executed:**
   - `python -m pytest tests/test_baseline.py tests/test_session_security.py` -> 20 passed in 28.08s.
 - **Existing Functionality Verified:** User login, password reset flow, protected route access, navbar context processor caching, and public routes.
+
+---
+
+### PHASE 2 — Authentication & Authorization (IDOR, Job Ownership)
+- **Status:** COMPLETED
+- **Git Commit:** c03eb22
+- **Files Created/Modified:**
+  - pp.py (Standardized @login_required decorator, strict background job ownership binding, safe ObjectId parsing via get_valid_object_id(), author-only draft access in UI/AI routes, author-only edit/delete/pin checks, whitelisted settings updates)
+  - 	ests/test_authorization.py (15 comprehensive authorization, IDOR, legacy job, and privilege-escalation tests)
+  - SECURITY_PROGRESS.md (Ledger update)
+- **Security Enhancements Implemented:**
+  - **Standardized Authentication Enforcement:** Created @login_required decorator that validates g.current_user and session['user'], returning 401 JSON for API requests and 302 redirect to /login for HTML requests. Applied across /post/new, /post/<id>/edit, /post/<id>/delete, /comment/<id>/pin, /dashboard, /settings, /settings/profile, /settings/account, /post/<id>/bookmark, /api/bookmark/<id>, /reading-list, /ai/research, /api/job/<id>, and /post/<id>/react/<reaction_type>.
+  - **Background Job Ownership:**
+    - Modified /ai/research to bind user_id and username from g.current_user to the newly inserted job document in MongoDB.
+    - Modified /api/job/<job_id> to enforce strict ownership verification. Only the originating user can query job status and retrieve AI research results.
+    - Rejected legacy ownerless jobs with 403 Forbidden to prevent information leakage.
+  - **IDOR Protection across Resources:**
+    - Posts: Only post authors can edit or delete their posts; verified in database lookup.
+    - Drafts: Non-authors (and anonymous visitors) are strictly blocked from viewing drafts in /post/<id>, generating AI summaries in /ai/summarize/<id>, or querying AI chat stream in /api/chat/stream/<id>.
+    - Comments: Only post authors can pin/unpin comments on their posts.
+    - Bookmarks / Reading List: User bookmarks are strictly isolated to the authenticated user document.
+  - **Safe Resource ID Parsing:** Implemented get_valid_object_id() to sanitize and validate MongoDB ObjectId strings. Prevents 500 unhandled InvalidId errors on malformed parameters across all endpoints.
+  - **Privilege-Escalation & Mass-Assignment Defense:** Sanitized profile and account settings handlers to write only explicitly whitelisted fields (io, vatar_url, email), preventing client injection of 
+ole, is_admin, or username.
+- **Tests Executed:**
+  - python -m pytest tests/test_authorization.py -> 15 passed in 14.67s.
+  - Full suite: python -m pytest tests -v -> 35 passed in 35.59s.

@@ -273,19 +273,26 @@ If you did not make this request then simply ignore this email and no changes wi
 
 @app.route('/test_email')
 def test_email():
+    # Production guard: Never expose or invoke test email in production or when not explicitly permitted
+    # Render deployments set RENDER=true or FLASK_ENV=production.
+    is_prod = (os.environ.get('FLASK_ENV') == 'production') or (os.environ.get('RENDER') == 'true')
+    allow_test_endpoint = os.environ.get('ENABLE_TEST_EMAIL_ENDPOINT', '').lower() in ('true', '1')
+    
+    if is_prod or not allow_test_endpoint:
+        abort(404)
+        
     key = os.environ.get('BREVO_API_KEY')
     if not key:
-        return "Error: BREVO_API_KEY not set."
+        return "Error: BREVO_API_KEY not set.", 500
         
     target_email = os.environ.get('MAIL_USER') 
-    
     if not target_email:
-        return "Error: MAIL_USER env var not set."
+        return "Error: MAIL_USER env var not set.", 500
 
     if send_email_brevo(target_email, "Brevo API Test", "If you read this, the Brevo integration is working!"):
-        return f"Email sent via Brevo to {target_email}! Check logs for details."
+        return "Email test successfully dispatched. Check logs for details.", 200
     else:
-        return "Failed to send email. Check Render logs for Brevo error response."
+        return "Failed to send test email. Check logs for details.", 500
 
 # Global Cache for Trending Posts
 TRENDING_CACHE = {

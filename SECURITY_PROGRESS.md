@@ -13,8 +13,9 @@ This document tracks the incremental security hardening and remediation plan for
 | Phase | Description | Priority | Status | Git Commit |
 |:---:|:---|:---:|:---:|:---:|
 | **PHASE 0** | Repository Baseline & Security Audit | Critical | **COMPLETED** | `82bc55f`, `55551f6` (two-commit reconciliation) |
-| **PHASE 1** | SECRET_KEY & Session Security | Critical | **COMPLETED** | `f8f1242` |
-| **PHASE 2** | Authentication & Authorization (IDOR, Job Ownership) | High | NOT STARTED | — |
+| **PHASE 1** | SECRET_KEY & Session Security | Critical | **COMPLETED** | `50523ac` |
+| **PHASE 2** | Authentication & Authorization (IDOR, Job Ownership) | High | **COMPLETED** | `d6a4418` |
+| **PHASE 2.2** | Emergency Public Email Endpoint Lockdown (`/test_email`) | High | **COMPLETED** | 69d2545 |
 | **PHASE 3** | CSRF Protection & Logout Method Correction | High | NOT STARTED | — |
 | **PHASE 4** | Password & Password Reset Security | High | NOT STARTED | — |
 | **PHASE 5** | Public Endpoint & Email Abuse Protection | High | NOT STARTED | — |
@@ -88,7 +89,7 @@ This document tracks the incremental security hardening and remediation plan for
 
 ### PHASE 2 — Authentication & Authorization (IDOR, Job Ownership)
 - **Status:** COMPLETED
-- **Git Commit:** c03eb22
+- **Git Commit:** `d6a4418`
 - **Files Created/Modified:**
   - pp.py (Standardized @login_required decorator, strict background job ownership binding, safe ObjectId parsing via get_valid_object_id(), author-only draft access in UI/AI routes, author-only edit/delete/pin checks, whitelisted settings updates)
   - 	ests/test_authorization.py (15 comprehensive authorization, IDOR, legacy job, and privilege-escalation tests)
@@ -106,7 +107,24 @@ This document tracks the incremental security hardening and remediation plan for
     - Bookmarks / Reading List: User bookmarks are strictly isolated to the authenticated user document.
   - **Safe Resource ID Parsing:** Implemented get_valid_object_id() to sanitize and validate MongoDB ObjectId strings. Prevents 500 unhandled InvalidId errors on malformed parameters across all endpoints.
   - **Privilege-Escalation & Mass-Assignment Defense:** Sanitized profile and account settings handlers to write only explicitly whitelisted fields (io, vatar_url, email), preventing client injection of 
-ole, is_admin, or username.
+`role`, `is_admin`, or `username`.
 - **Tests Executed:**
   - python -m pytest tests/test_authorization.py -> 15 passed in 14.67s.
   - Full suite: python -m pytest tests -v -> 35 passed in 35.59s.
+
+---
+
+### PHASE 2.2 — Emergency Public Email Endpoint Lockdown (`/test_email`)
+- **Status:** COMPLETED
+- **Git Commit:** 69d2545
+- **Files Created/Modified:**
+  - `app.py` (Production guard on `/test_email` returning 404 in production or when not explicitly permitted)
+  - `tests/test_email_security.py` (6 tests verifying 404 in production, mock verification that Brevo is never called, missing config handling, and test-environment flag isolation)
+  - `SECURITY_PROGRESS.md` (Ledger update)
+- **Security Enhancements Implemented:**
+  - **Production Guard (`/test_email`):** Added strict check `is_prod = (os.environ.get('FLASK_ENV') == 'production') or (os.environ.get('RENDER') == 'true')` and `ENABLE_TEST_EMAIL_ENDPOINT` flag requirement.
+  - **Fail-Closed 404:** If in production, or if `ENABLE_TEST_EMAIL_ENDPOINT` is not explicitly set to `true`/`1`, the route immediately aborts with `404 Not Found` without parsing configuration or dispatching emails via Brevo.
+  - **Zero Secret Exposure:** Error messages and responses never echo API keys or user emails.
+- **Tests Executed:**
+  - `python -m pytest tests/test_email_security.py` -> 6 passed in 10.74s.
+  - Full suite: `python -m pytest tests -v` -> 41 passed in 32.70s.

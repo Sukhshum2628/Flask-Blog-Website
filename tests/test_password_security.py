@@ -5,12 +5,13 @@ from unittest.mock import patch
 import pytest
 from bson.objectid import ObjectId
 from werkzeug.security import generate_password_hash, check_password_hash
-from app import app, users, password_reset_tokens, get_reset_token, verify_reset_token, hash_password
+from app import app, users, password_reset_tokens, get_reset_token, verify_reset_token, hash_password, limiter
 
 @pytest.fixture
 def auth_client():
     app.config["TESTING"] = True
     app.config["WTF_CSRF_ENABLED"] = False
+    limiter.reset()
     return app.test_client()
 
 @pytest.fixture
@@ -308,23 +309,227 @@ def test_reset_request_returns_same_response_for_nonexistent_email(auth_client):
     login_page = auth_client.get('/login')
     assert b"An email has been sent with instructions to reset your password" in login_page.data
 
-def test_reset_email_dispatches_with_trusted_app_url(auth_client, test_user, monkeypatch):
-    """Reset URL is bound to trusted APP_URL / BASE_URL environment variable."""
+def test_reset_url_valid_https_app_url(auth_client, test_user, monkeypatch):
+    """1. Valid HTTPS APP_URL generates the correct reset link."""
     sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://flaskblog.security.io")
+    monkeypatch.delenv("BASE_URL", raising=False)
 
-    def mock_send(app_ctx, to_email, subject, body):
-        sent_emails.append({'to': to_email, 'subject': subject, 'body': body})
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]
 
-    monkeypatch.setattr("app.send_async_email", mock_send)
+def test_reset_url_valid_base_url_when_app_url_absent(auth_client, test_user, monkeypatch):
+    """2. Valid BASE_URL works when APP_URL is absent."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.delenv("APP_URL", raising=False)
+    monkeypatch.setenv("BASE_URL", "https://base.flaskblog.io")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://base.flaskblog.io/reset_password/" in sent_emails[0]
+
+def test_reset_url_production_without_origin_fails_closed(auth_client, test_user, monkeypatch):
+    """3. Production with neither variable configured fails closed (no email dispatched)."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.delenv("APP_URL", raising=False)
+    monkeypatch.delenv("BASE_URL", raising=False)
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    # Generic public response is preserved
+    assert resp.status_code == 302
+    # But email sending fails closed; no poisoned or unvalidated link is sent
+    assert len(sent_emails) == 0
+
+def test_reset_url_forged_host_header_cannot_influence_link(auth_client, test_user, monkeypatch):
+    """4. A forged Host header cannot influence the generated reset link."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
     monkeypatch.setenv("APP_URL", "https://flaskblog.security.io")
 
-    resp = auth_client.post('/reset_password', data={
-        'email': test_user['email']
-    }, follow_redirects=False)
+    resp = auth_client.post('/reset_password', 
+        data={'email': test_user['email']},
+        headers={'Host': 'attacker-evil-host.com'},
+        follow_redirects=False
+    )
     assert resp.status_code == 302
-
     assert len(sent_emails) == 1
-    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]['body']
+    assert "attacker-evil-host.com" not in sent_emails[0]
+    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]
+
+def test_reset_url_forged_x_forwarded_host_cannot_influence_link(auth_client, test_user, monkeypatch):
+    """5. A forged X-Forwarded-Host header cannot influence the generated reset link."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://flaskblog.security.io")
+
+    resp = auth_client.post('/reset_password', 
+        data={'email': test_user['email']},
+        headers={'X-Forwarded-Host': 'spoofed-domain.com'},
+        follow_redirects=False
+    )
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "spoofed-domain.com" not in sent_emails[0]
+    assert "https://flaskblog.security.io/reset_password/" in sent_emails[0]
+
+def test_reset_url_http_scheme_rejected_in_production(auth_client, test_user, monkeypatch):
+    """6. HTTP production URLs are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("APP_URL", "http://insecure-http-url.com")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    # Fails closed, no email sent
+    assert len(sent_emails) == 0
+
+def test_reset_url_embedded_credentials_rejected(auth_client, test_user, monkeypatch):
+    """7. URLs containing credentials are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://user:password@flaskblog.io")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_query_strings_or_fragments_rejected(auth_client, test_user, monkeypatch):
+    """8. URLs containing query strings or fragments are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    
+    # Query string test
+    monkeypatch.setenv("APP_URL", "https://flaskblog.io/path?query=1")
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+    # Fragment test
+    monkeypatch.setenv("APP_URL", "https://flaskblog.io/path#fragment")
+    resp2 = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp2.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_malformed_unsupported_scheme_rejected(auth_client, test_user, monkeypatch):
+    """9. Malformed or unsupported URLs are rejected."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "ftp://flaskblog.io")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_development_behavior_functional(auth_client, test_user, monkeypatch):
+    """10. Existing development behavior remains functional when unconfigured."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("APP_URL", raising=False)
+    monkeypatch.delenv("BASE_URL", raising=False)
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "/reset_password/" in sent_emails[0]
+
+def test_reset_url_render_production_overrides_test_flag(auth_client, test_user, monkeypatch):
+    """11. Production validation cannot be bypassed by test-related environment flags."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("APP_URL", "http://insecure-on-render.com")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    # Insecure HTTP on Render must fail closed despite TESTING=true
+    assert len(sent_emails) == 0
+
+def test_reset_url_non_integer_port_rejected(auth_client, test_user, monkeypatch):
+    """12. Origins with non-integer ports (e.g. :abc) are rejected and fail closed."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:abc")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_out_of_range_port_rejected(auth_client, test_user, monkeypatch):
+    """13. Origins with out-of-range ports (e.g. :70000) are rejected and fail closed."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:70000")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_port_zero_rejected(auth_client, test_user, monkeypatch):
+    """14. Port 0 is explicitly rejected and fails closed."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:0")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
+
+def test_reset_url_valid_https_port_accepted(auth_client, test_user, monkeypatch):
+    """15. A valid HTTPS port is accepted and included in reset link."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://example.com:8443")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://example.com:8443/reset_password/" in sent_emails[0]
+
+def test_reset_url_valid_ipv4_with_port_preserved(auth_client, test_user, monkeypatch):
+    """16. A valid IPv4 origin with a port is accepted and preserved in development."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("APP_URL", "http://127.0.0.1:5000")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "http://127.0.0.1:5000/reset_password/" in sent_emails[0]
+
+def test_reset_url_valid_bracketed_ipv6_preserved(auth_client, test_user, monkeypatch):
+    """17. A valid bracketed IPv6 origin (with port) is preserved."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("APP_URL", "https://[::1]:8443")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 1
+    assert "https://[::1]:8443/reset_password/" in sent_emails[0]
+
+def test_reset_url_invalid_production_port_fails_closed(auth_client, test_user, monkeypatch):
+    """18. Invalid production port configuration strictly fails closed and sends no email."""
+    sent_emails = []
+    monkeypatch.setattr("app.send_async_email", lambda app_ctx, to, subj, body: sent_emails.append(body))
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("APP_URL", "https://prod.flaskblog.io:badport")
+
+    resp = auth_client.post('/reset_password', data={'email': test_user['email']}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert len(sent_emails) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -360,3 +565,245 @@ def test_password_reset_increments_token_version_and_invalidates_old_sessions(au
     res2 = auth_client.get('/dashboard', follow_redirects=False)
     assert res2.status_code == 302
     assert '/login' in res2.headers['Location']
+
+
+# ---------------------------------------------------------------------------
+# 7. Sibling Token Invalidation & Lifecycle (F-02)
+# ---------------------------------------------------------------------------
+
+def test_sibling_tokens_invalidated_after_successful_reset(auth_client, test_user):
+    """When a reset succeeds, all outstanding sibling tokens for the user are invalidated."""
+    token1 = get_reset_token(test_user['_id'])
+    token2 = get_reset_token(test_user['_id'])
+    token3 = get_reset_token(test_user['_id'])
+
+    # All three tokens exist and verify
+    assert verify_reset_token(token1) is not None
+    assert verify_reset_token(token2) is not None
+    assert verify_reset_token(token3) is not None
+
+    # Reset password using token1
+    new_pass = "BrandNewSecret123!"
+    resp = auth_client.post(f'/reset_password/{token1}', data={
+        'password': new_pass,
+        'confirm_password': new_pass
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/login'
+
+    # Token1 cannot be reused
+    assert verify_reset_token(token1) is None
+    reuse_resp = auth_client.post(f'/reset_password/{token1}', data={
+        'password': "AnotherPassword999!",
+        'confirm_password': "AnotherPassword999!"
+    }, follow_redirects=False)
+    assert reuse_resp.status_code == 302
+    assert reuse_resp.headers['Location'] == '/reset_password'
+
+    # Sibling tokens (token2 and token3) are now invalidated
+    assert verify_reset_token(token2) is None
+    assert verify_reset_token(token3) is None
+
+    # Attempting to reset with sibling token2 fails
+    resp2 = auth_client.post(f'/reset_password/{token2}', data={
+        'password': "AnotherPassword999!",
+        'confirm_password': "AnotherPassword999!"
+    }, follow_redirects=False)
+    assert resp2.status_code == 302
+    assert resp2.headers['Location'] == '/reset_password'
+
+    # Verify audit trail: sibling tokens marked used=True with reason
+    t2_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token2.encode('utf-8')).hexdigest()})
+    assert t2_doc['used'] is True
+    assert t2_doc['invalidated_reason'] == 'sibling_reset'
+
+def test_sibling_invalidation_does_not_affect_other_users(auth_client, test_user):
+    """Invalidating sibling tokens for user A does not affect tokens for user B."""
+    # Create user B
+    user_b_id = users.insert_one({
+        "username": "sibling_other_user",
+        "email": "sibling_other_user@example.com",
+        "password": hash_password("PasswordUserB123!"),
+        "token_version": 1
+    }).inserted_id
+
+    try:
+        user_a_token1 = get_reset_token(test_user['_id'])
+        user_a_token2 = get_reset_token(test_user['_id'])
+        user_b_token = get_reset_token(user_b_id)
+
+        # Reset using user A's token1
+        new_pass_a = "UserANewPassword123!"
+        resp = auth_client.post(f'/reset_password/{user_a_token1}', data={
+            'password': new_pass_a,
+            'confirm_password': new_pass_a
+        }, follow_redirects=False)
+        assert resp.status_code == 302
+
+        # User A's sibling token2 is invalidated
+        assert verify_reset_token(user_a_token2) is None
+
+        # User B's token remains completely valid and usable
+        assert verify_reset_token(user_b_token) is not None
+        new_pass_b = "UserBNewPassword999!"
+        resp_b = auth_client.post(f'/reset_password/{user_b_token}', data={
+            'password': new_pass_b,
+            'confirm_password': new_pass_b
+        }, follow_redirects=False)
+        assert resp_b.status_code == 302
+        assert resp_b.headers['Location'] == '/login'
+
+        # User B can now log in with new password
+        user_b_updated = users.find_one({'_id': user_b_id})
+        assert check_password_hash(user_b_updated['password'], new_pass_b)
+    finally:
+        users.delete_one({'_id': user_b_id})
+        password_reset_tokens.delete_many({'user_id': str(user_b_id)})
+
+def test_expired_sibling_token_remains_unusable(auth_client, test_user):
+    """An expired token remains unusable before and after sibling reset."""
+    raw_token = get_reset_token(test_user['_id'])
+    # Manually expire the token
+    token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    past_time = datetime.now(timezone.utc) - timedelta(hours=2)
+    password_reset_tokens.update_one({'token_hash': token_hash}, {'$set': {'expires_at': past_time}})
+
+    assert verify_reset_token(raw_token) is None
+    resp = auth_client.post(f'/reset_password/{raw_token}', data={
+        'password': 'SomeNewPassword123!',
+        'confirm_password': 'SomeNewPassword123!'
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+def test_invalid_token_does_not_change_password(auth_client, test_user):
+    """Non-existent token cannot reset password."""
+    resp = auth_client.post('/reset_password/non_existent_token_string_123', data={
+        'password': 'SomeNewPassword123!',
+        'confirm_password': 'SomeNewPassword123!'
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+    # Verify password unchanged
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(curr_user['password'], test_user['raw_pass'])
+
+def test_mismatched_password_confirmation_does_not_consume_token(auth_client, test_user):
+    """Form validation error (mismatched password) does not consume the token."""
+    token = get_reset_token(test_user['_id'])
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'ValidPassword123!',
+        'confirm_password': 'MismatchedPassword123!'
+    }, follow_redirects=False)
+    assert resp.status_code == 200 # Re-renders form
+
+    # Token must still be valid and unconsumed
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+    assert verify_reset_token(token) is not None
+
+def test_failed_password_validation_does_not_consume_token(auth_client, test_user):
+    """Form validation error (too short password) does not consume token."""
+    token = get_reset_token(test_user['_id'])
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'short',
+        'confirm_password': 'short'
+    }, follow_redirects=False)
+    assert resp.status_code == 200
+
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+    assert verify_reset_token(token) is not None
+
+def test_password_update_failure_aborts_transaction(auth_client, test_user, monkeypatch):
+    """If database fails during password update, transaction aborts: token remains unconsumed, password unchanged."""
+    token = get_reset_token(test_user['_id'])
+
+    orig_update_one = users.update_one
+    def fail_update(*args, **kwargs):
+        raise RuntimeError("Simulated database write error during password update")
+
+    monkeypatch.setattr(users, "update_one", fail_update)
+
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'NewPassword123!',
+        'confirm_password': 'NewPassword123!'
+    }, follow_redirects=False)
+
+    # User redirected back to reset_request due to transaction abort
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+    # Token must NOT be consumed in DB (transaction rollback)
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+
+    # Password must remain unchanged
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(curr_user['password'], test_user['raw_pass'])
+
+def test_sibling_invalidation_failure_aborts_entire_transaction(auth_client, test_user, monkeypatch):
+    """If sibling invalidation fails, entire transaction aborts: token unconsumed, password unchanged."""
+    token = get_reset_token(test_user['_id'])
+    sibling_token = get_reset_token(test_user['_id'])
+
+    def fail_update_many(*args, **kwargs):
+        raise RuntimeError("Simulated database failure during sibling invalidation")
+
+    monkeypatch.setattr(password_reset_tokens, "update_many", fail_update_many)
+
+    resp = auth_client.post(f'/reset_password/{token}', data={
+        'password': 'NewPassword123!',
+        'confirm_password': 'NewPassword123!'
+    }, follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+
+    # Submitted token remained unconsumed
+    token_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(token.encode('utf-8')).hexdigest()})
+    assert token_doc['used'] is False
+
+    # Sibling token remained unconsumed
+    sib_doc = password_reset_tokens.find_one({'token_hash': hashlib.sha256(sibling_token.encode('utf-8')).hexdigest()})
+    assert sib_doc['used'] is False
+
+    # User password unchanged and token_version unchanged
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert curr_user['token_version'] == 1
+    assert check_password_hash(curr_user['password'], test_user['raw_pass'])
+
+def test_concurrent_sibling_token_resets_prevented(auth_client, test_user):
+    """Two concurrent requests using different sibling tokens cannot both succeed.
+    
+    When one transaction commits and increments token_version, the other request's 
+    transaction detects the version change (matched_count == 0) and aborts cleanly.
+    """
+    token1 = get_reset_token(test_user['_id'])
+    token2 = get_reset_token(test_user['_id'])
+
+    # Request 1 resets password with token1
+    resp1 = auth_client.post(f'/reset_password/{token1}', data={
+        'password': 'WinnerPassword123!',
+        'confirm_password': 'WinnerPassword123!'
+    }, follow_redirects=False)
+    assert resp1.status_code == 302
+    assert resp1.headers['Location'] == '/login'
+
+    # Request 2 (losing or simultaneous sibling request) attempts reset with token2
+    resp2 = auth_client.post(f'/reset_password/{token2}', data={
+        'password': 'LosingPassword123!',
+        'confirm_password': 'LosingPassword123!'
+    }, follow_redirects=False)
+    assert resp2.status_code == 302
+    assert resp2.headers['Location'] == '/reset_password'
+
+    # Verify winning password is set, losing password is NOT set
+    curr_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(curr_user['password'], 'WinnerPassword123!')
+    assert not check_password_hash(curr_user['password'], 'LosingPassword123!')
+
+    # Both tokens are now unusable
+    assert verify_reset_token(token1) is None
+    assert verify_reset_token(token2) is None

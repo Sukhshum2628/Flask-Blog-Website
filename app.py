@@ -22,14 +22,40 @@ from flask_limiter.util import get_remote_address
 load_dotenv()
 
 app = Flask(__name__)
-# ... (config follows)
-app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_me")
-if app.secret_key == "dev_secret_key_change_me":
-    # Sessions and password-reset tokens are only as safe as this key. Falling
-    # back to the hardcoded default in production makes them forgeable.
-    print("WARNING: SECRET_KEY not set - using insecure dev default. "
-          "Set SECRET_KEY in the environment for production.", flush=True)
+
+# Environment & Secret Key Management
+import sys
+FLASK_ENV = os.environ.get("FLASK_ENV", "development" if os.path.exists(".env") else "production")
+IS_TESTING = os.environ.get("TESTING", "").lower() in ("true", "1") or ("pytest" in sys.modules) or ("test" in sys.argv[0].lower())
+IS_PRODUCTION = (os.environ.get("FLASK_ENV") == "production") or (os.environ.get("RENDER") == "true")
+if IS_TESTING:
+    IS_PRODUCTION = False
+
+raw_secret = os.environ.get("SECRET_KEY")
+
+if IS_PRODUCTION:
+    if not raw_secret or not raw_secret.strip() or raw_secret == "dev_secret_key_change_me":
+        raise RuntimeError(
+            "FATAL SECURITY ERROR: A secure, non-default SECRET_KEY environment variable "
+            "must be configured in production. Application startup aborted."
+        )
+    if len(raw_secret.strip()) < 32:
+        raise RuntimeError(
+            "FATAL SECURITY ERROR: SECRET_KEY must contain at least 32 characters of entropy in production."
+        )
+    app.secret_key = raw_secret.strip()
+else:
+    # Explicit development / testing fallback
+    app.secret_key = raw_secret.strip() if (raw_secret and raw_secret.strip()) else "dev_explicit_insecure_local_testing_key_32chars"
+
+app.config["SECRET_KEY"] = app.secret_key
 app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
+
+# Session Cookie Hardening
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "true" if IS_PRODUCTION else "false").lower() == "true"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 
 # CSRF protection for all form POSTs. JSON/SSE fetch endpoints (called by JS
 # without a token) are individually exempted with @csrf.exempt below.
@@ -52,6 +78,26 @@ def set_csp_nonce():
     # Fresh per-request nonce so inline <script> blocks can be whitelisted
     # without allowing arbitrary injected script ('unsafe-inline').
     g.csp_nonce = secrets.token_urlsafe(16)
+
+@app.before_request
+def validate_session_state():
+    # Ensure active session corresponds to a valid user and revocation token version
+    if 'user' in session:
+        user = users.find_one({'username': session['user']})
+        if not user:
+            session.clear()
+            g.current_user = None
+            return
+        
+        expected_version = user.get('token_version', 1)
+        if session.get('token_version') != expected_version:
+            session.clear()
+            g.current_user = None
+            return
+            
+        g.current_user = user
+    else:
+        g.current_user = None
 
 @app.context_processor
 def inject_csp_nonce():
@@ -405,8 +451,8 @@ def _get_navbar_activity():
 # Context Processor for User Info in Navbar
 @app.context_processor
 def inject_user():
-    current_user = None
-    if 'user' in session:
+    current_user = getattr(g, 'current_user', None)
+    if current_user is None and 'user' in session:
         current_user = users.find_one({'username': session['user']})
 
     activity = _get_navbar_activity()
@@ -635,7 +681,11 @@ def login():
             ]
         })
         if user and check_password_hash(user['password'], form.password.data):
+            # Regenerate / clear previous session state to prevent session fixation
+            session.clear()
+            token_version = user.get('token_version', 1)
             session['user'] = user['username']
+            session['token_version'] = token_version
             
             # Check for digest trigger
             last_visit = user.get('last_visit')
@@ -681,14 +731,22 @@ def reset_token(token):
     form = ResetPasswordForm()
     if form.validate_on_submit():
         hash_pwd = generate_password_hash(form.password.data)
-        users.update_one({'_id': user_doc['_id']}, {'$set': {'password': hash_pwd}})
+        # Increment token_version to invalidate all existing sessions
+        users.update_one(
+            {'_id': user_doc['_id']},
+            {
+                '$set': {'password': hash_pwd},
+                '$inc': {'token_version': 1}
+            }
+        )
+        session.clear()
         flash('Your password has been updated! You are now able to log in', 'success')
         return redirect(url_for('login'))
     return render_template('reset_token.html', form=form)
 
 @app.route('/logout')
 def logout():
-    session.pop('user', None)
+    session.clear()
     flash('Logged out.', 'info')
     return redirect(url_for('index'))
 

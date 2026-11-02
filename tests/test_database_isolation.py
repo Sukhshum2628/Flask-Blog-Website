@@ -49,6 +49,21 @@ def test_production_cluster_and_db_fingerprint_rejected():
     assert res.returncode != 0
     assert "Test database must be distinct from production" in res.stderr
 
+def test_production_cluster_with_custom_test_dbname_rejected():
+    """Verify that TEST_MONGO_URI pointing to production cluster even with blogDB_isolated_test halts startup."""
+    cmd = [
+        "python", "-c",
+        "import os; os.environ['TESTING'] = 'true'; os.environ['TEST_MONGO_URI'] = 'mongodb+srv://user:pass@cluster0.e3az295.mongodb.net/blogDB_isolated_test?retryWrites=true&w=majority'; import app"
+    ]
+    env = os.environ.copy()
+    env['TESTING'] = 'true'
+    env['TEST_MONGO_URI'] = 'mongodb+srv://user:pass@cluster0.e3az295.mongodb.net/blogDB_isolated_test?retryWrites=true&w=majority'
+
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert res.returncode != 0
+    assert "TEST_MONGO_URI targets production cluster 'cluster0.e3az295.mongodb.net'" in res.stderr
+    assert "Automated tests must run on an isolated test cluster" in res.stderr
+
 def test_valid_isolated_test_database_accepted():
     """Verify that an explicit isolated test database is accepted in test mode."""
     cmd = [

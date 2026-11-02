@@ -55,6 +55,16 @@ app.config["SECRET_KEY"] = app.secret_key
 PROD_DATABASE_NAME = "blogDB"
 PROD_CLUSTER_FINGERPRINT = "cluster0.e3az295.mongodb.net"
 
+def normalize_mongo_cluster(raw_uri):
+    """Extract normalized host:port or cluster authority without credentials."""
+    if not raw_uri or not isinstance(raw_uri, str):
+        return None
+    p = urlparse(raw_uri.strip())
+    netloc = p.netloc
+    if '@' in netloc:
+        netloc = netloc.split('@')[1]
+    return netloc.lower()
+
 if IS_TESTING:
     test_mongo_uri = os.environ.get("TEST_MONGO_URI")
     if not test_mongo_uri or not test_mongo_uri.strip():
@@ -74,10 +84,11 @@ if IS_TESTING:
             "Test database must be distinct from production."
         )
 
-    if parsed_test.hostname == PROD_CLUSTER_FINGERPRINT and test_db_name == PROD_DATABASE_NAME:
+    test_cluster = normalize_mongo_cluster(test_mongo_uri)
+    if test_cluster == PROD_CLUSTER_FINGERPRINT.lower():
         raise RuntimeError(
-            f"FATAL SECURITY ERROR: TEST_MONGO_URI targets production cluster '{PROD_CLUSTER_FINGERPRINT}' "
-            f"and database '{PROD_DATABASE_NAME}'. Test execution aborted."
+            f"FATAL SECURITY ERROR: TEST_MONGO_URI targets production cluster '{PROD_CLUSTER_FINGERPRINT}'. "
+            "Automated tests must run on an isolated test cluster, regardless of database name."
         )
 
     app.config["MONGO_URI"] = test_mongo_uri.strip()

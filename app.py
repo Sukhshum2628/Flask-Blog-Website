@@ -51,7 +51,38 @@ else:
     app.secret_key = raw_secret.strip() if (raw_secret and raw_secret.strip()) else "dev_explicit_insecure_local_testing_key_32chars"
 
 app.config["SECRET_KEY"] = app.secret_key
-app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
+# Known production database and cluster identifiers for fail-fast isolation protection
+PROD_DATABASE_NAME = "blogDB"
+PROD_CLUSTER_FINGERPRINT = "cluster0.e3az295.mongodb.net"
+
+if IS_TESTING:
+    test_mongo_uri = os.environ.get("TEST_MONGO_URI")
+    if not test_mongo_uri or not test_mongo_uri.strip():
+        raise RuntimeError(
+            "FATAL SECURITY ERROR: Automated testing requires an explicit TEST_MONGO_URI. "
+            "Never run tests against default or production database."
+        )
+
+    parsed_test = urlparse(test_mongo_uri.strip())
+    test_db_name = parsed_test.path.lstrip('/')
+    if not test_db_name:
+        raise RuntimeError("FATAL SECURITY ERROR: TEST_MONGO_URI must include a target database name.")
+
+    if test_db_name == PROD_DATABASE_NAME:
+        raise RuntimeError(
+            f"FATAL SECURITY ERROR: TEST_MONGO_URI targets production database '{PROD_DATABASE_NAME}'. "
+            "Test database must be distinct from production."
+        )
+
+    if parsed_test.hostname == PROD_CLUSTER_FINGERPRINT and test_db_name == PROD_DATABASE_NAME:
+        raise RuntimeError(
+            f"FATAL SECURITY ERROR: TEST_MONGO_URI targets production cluster '{PROD_CLUSTER_FINGERPRINT}' "
+            f"and database '{PROD_DATABASE_NAME}'. Test execution aborted."
+        )
+
+    app.config["MONGO_URI"] = test_mongo_uri.strip()
+else:
+    app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
 
 # Session Cookie Hardening
 app.config["SESSION_COOKIE_HTTPONLY"] = True

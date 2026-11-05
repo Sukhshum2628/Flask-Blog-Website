@@ -957,52 +957,54 @@ def reset_token(token):
         client = mongo.cx
 
         try:
+            def _reset_txn_callback(db_session):
+                # 1. Atomically consume the submitted token inside the transaction
+                consumed = password_reset_tokens.find_one_and_update(
+                    {
+                        'token_hash': token_hash,
+                        'used': False,
+                        'expires_at': {'$gt': now}
+                    },
+                    {
+                        '$set': {'used': True, 'consumed_at': now}
+                    },
+                    session=db_session
+                )
+                if not consumed:
+                    raise ValueError("Invalid, expired, or already consumed token.")
+
+                # 2. Acquire user document and verify token_version for concurrency conflict protection
+                # Locking/conditional write on token_version ensures that if another concurrent request
+                # committed a reset, this transaction will abort on write conflict or matched_count == 0
+                current_token_version = user_doc.get('token_version', 1)
+                update_result = users.update_one(
+                    {
+                        '_id': user_doc['_id'],
+                        'token_version': current_token_version
+                    },
+                    {
+                        '$set': {'password': hash_pwd},
+                        '$inc': {'token_version': 1}
+                    },
+                    session=db_session
+                )
+                if update_result.matched_count == 0:
+                    raise ValueError("Concurrent password reset detected. Aborting transaction.")
+
+                # 3. Invalidate all remaining sibling reset tokens for this user inside the transaction
+                password_reset_tokens.update_many(
+                    {
+                        'user_id': str(user_doc['_id']),
+                        'used': False
+                    },
+                    {
+                        '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
+                    },
+                    session=db_session
+                )
+
             with client.start_session() as db_session:
-                with db_session.start_transaction():
-                    # 1. Atomically consume the submitted token inside the transaction
-                    consumed = password_reset_tokens.find_one_and_update(
-                        {
-                            'token_hash': token_hash,
-                            'used': False,
-                            'expires_at': {'$gt': now}
-                        },
-                        {
-                            '$set': {'used': True, 'consumed_at': now}
-                        },
-                        session=db_session
-                    )
-                    if not consumed:
-                        raise ValueError("Invalid, expired, or already consumed token.")
-
-                    # 2. Acquire user document and verify token_version for concurrency conflict protection
-                    # Locking/conditional write on token_version ensures that if another concurrent request
-                    # committed a reset, this transaction will abort on write conflict or matched_count == 0
-                    current_token_version = user_doc.get('token_version', 1)
-                    update_result = users.update_one(
-                        {
-                            '_id': user_doc['_id'],
-                            'token_version': current_token_version
-                        },
-                        {
-                            '$set': {'password': hash_pwd},
-                            '$inc': {'token_version': 1}
-                        },
-                        session=db_session
-                    )
-                    if update_result.matched_count == 0:
-                        raise ValueError("Concurrent password reset detected. Aborting transaction.")
-
-                    # 3. Invalidate all remaining sibling reset tokens for this user inside the transaction
-                    password_reset_tokens.update_many(
-                        {
-                            'user_id': str(user_doc['_id']),
-                            'used': False
-                        },
-                        {
-                            '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
-                        },
-                        session=db_session
-                    )
+                db_session.with_transaction(_reset_txn_callback)
 
         except Exception as e:
             print(f"Password reset transaction failed/aborted: {e}", flush=True)

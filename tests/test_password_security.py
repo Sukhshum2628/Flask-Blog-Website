@@ -807,3 +807,146 @@ def test_concurrent_sibling_token_resets_prevented(auth_client, test_user):
     # Both tokens are now unusable
     assert verify_reset_token(token1) is None
     assert verify_reset_token(token2) is None
+
+
+def test_concurrent_overlapping_sibling_token_resets(test_user):
+    """Test genuine overlapping execution of two concurrent reset requests using ThreadPoolExecutor.
+    
+    A threading.Barrier synchronizes both worker threads inside the token consumption stage
+    before either thread performs the password update and increments token_version.
+    Exactly one request commits, the other aborts on token_version conflict or sibling invalidation,
+    token_version increments exactly once, and the winning password is confirmed in the database.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    token1 = get_reset_token(test_user['_id'])
+    token2 = get_reset_token(test_user['_id'])
+
+    client1 = app.test_client()
+    client2 = app.test_client()
+
+    barrier = threading.Barrier(2, timeout=5)
+    overlap_confirmed = threading.Event()
+    orig_find_one_and_update = password_reset_tokens.find_one_and_update
+
+    def synchronized_find_one_and_update(*args, **kwargs):
+        res = orig_find_one_and_update(*args, **kwargs)
+        # Only synchronize for reset token consumption calls inside sessions
+        if kwargs.get('session') is not None and args and isinstance(args[0], dict) and 'token_hash' in args[0]:
+            try:
+                barrier.wait()
+                overlap_confirmed.set()
+            except threading.BrokenBarrierError:
+                pass
+        return res
+
+    results = {}
+    def perform_reset(client_instance, token, password, req_name):
+        resp = client_instance.post(f'/reset_password/{token}', data={
+            'password': password,
+            'confirm_password': password
+        }, follow_redirects=False)
+        return resp.status_code, resp.headers.get('Location')
+
+    import unittest.mock
+    with unittest.mock.patch.object(password_reset_tokens, 'find_one_and_update', side_effect=synchronized_find_one_and_update):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future1 = executor.submit(perform_reset, client1, token1, 'ConcurrentWinner123!', 'req1')
+            future2 = executor.submit(perform_reset, client2, token2, 'ConcurrentRacer123!', 'req2')
+            status1, loc1 = future1.result()
+            status2, loc2 = future2.result()
+
+    assert overlap_confirmed.is_set(), "Test failed to establish deterministic concurrency overlap at barrier"
+
+    # Exactly one request must redirect to /login (success)
+    # The other must redirect to /reset_password or /reset_request (failure)
+    statuses = [status1, status2]
+    locations = [loc1, loc2]
+    assert statuses == [302, 302]
+
+    success_count = sum(1 for loc in locations if loc == '/login')
+    fail_count = sum(1 for loc in locations if loc in ('/reset_password', '/reset_request'))
+    assert success_count == 1, f"Expected exactly 1 successful reset, got {success_count}. Locations: {locations}"
+    assert fail_count == 1, f"Expected exactly 1 failed reset, got {fail_count}. Locations: {locations}"
+
+    # Database state assertions
+    updated_user = users.find_one({'_id': test_user['_id']})
+    assert updated_user['token_version'] == 2, f"token_version should have incremented exactly once from 1 to 2, got {updated_user['token_version']}"
+
+    # Verify winning password matches the successful request
+    if loc1 == '/login':
+        assert check_password_hash(updated_user['password'], 'ConcurrentWinner123!')
+        assert not check_password_hash(updated_user['password'], 'ConcurrentRacer123!')
+    else:
+        assert check_password_hash(updated_user['password'], 'ConcurrentRacer123!')
+        assert not check_password_hash(updated_user['password'], 'ConcurrentWinner123!')
+
+    # Both tokens are unusable
+    assert verify_reset_token(token1) is None
+    assert verify_reset_token(token2) is None
+
+
+def test_transaction_retry_on_transient_error(auth_client, test_user):
+    """Verify PyMongo with_transaction retries on TransientTransactionError and succeeds."""
+    from pymongo.errors import PyMongoError
+
+    token = get_reset_token(test_user['_id'])
+    orig_update_one = users.update_one
+    attempts = {'count': 0}
+
+    def fail_once_then_succeed(*args, **kwargs):
+        attempts['count'] += 1
+        if attempts['count'] == 1:
+            err = PyMongoError("Simulated transient write conflict", error_labels=["TransientTransactionError"])
+            raise err
+        return orig_update_one(*args, **kwargs)
+
+    import unittest.mock
+    with unittest.mock.patch.object(users, 'update_one', side_effect=fail_once_then_succeed):
+        resp = auth_client.post(f'/reset_password/{token}', data={
+            'password': 'RetryPassword123!',
+            'confirm_password': 'RetryPassword123!'
+        }, follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/login'
+    assert attempts['count'] == 2, f"Expected callback to be executed twice due to transient retry, got {attempts['count']}"
+
+    # Verify database state after successful retry
+    updated_user = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(updated_user['password'], 'RetryPassword123!')
+    assert updated_user['token_version'] == 2
+    assert verify_reset_token(token) is None
+
+
+def test_transaction_uncertain_commit_result_not_duplicated(auth_client, test_user):
+    """Verify that an unresolvable commit error does not start an independent second transaction."""
+    from pymongo.errors import PyMongoError
+    from pymongo.client_session import ClientSession
+
+    token = get_reset_token(test_user['_id'])
+    txn_invocations = {'count': 0}
+    orig_with_transaction = ClientSession.with_transaction
+
+    def mock_with_txn(session_self, callback, *args, **kwargs):
+        txn_invocations['count'] += 1
+        # Simulate PyMongo raising an error when retries exhaust
+        raise PyMongoError("Commit outcome unknown after retries exhausted", error_labels=["UnknownTransactionCommitResult"])
+
+    import unittest.mock
+    with unittest.mock.patch.object(ClientSession, 'with_transaction', mock_with_txn):
+        resp = auth_client.post(f'/reset_password/{token}', data={
+            'password': 'NeverApplied123!',
+            'confirm_password': 'NeverApplied123!'
+        }, follow_redirects=False)
+
+    # Must fail safely without starting a second competing transaction
+    assert resp.status_code == 302
+    assert resp.headers['Location'] == '/reset_password'
+    assert txn_invocations['count'] == 1, "Must invoke with_transaction exactly once without starting a secondary transaction"
+
+    # User password unchanged
+    user_doc = users.find_one({'_id': test_user['_id']})
+    assert check_password_hash(user_doc['password'], test_user['raw_pass'])
+

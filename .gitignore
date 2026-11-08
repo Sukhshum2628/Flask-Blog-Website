@@ -1,7 +1,18 @@
 .env
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 venv/
 .pytest_cache/
 .DS_Store
 instance/
+
+# Local debugging outputs at repository root
+/error.txt
+/error2.txt
+/test_out.txt
+
+# Generated benchmark outputs
+/loadtest/*.csv
+/eval/ragas_results.csv

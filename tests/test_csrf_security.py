@@ -1,7 +1,8 @@
 import re
 import pytest
-from app import app
+from app import app, posts, activities
 from bson.objectid import ObjectId
+from unittest.mock import MagicMock
 
 @pytest.fixture
 def csrf_client():
@@ -53,8 +54,8 @@ def test_invalid_csrf_token_rejected(csrf_client):
     assert resp.status_code == 400
     assert b"Request Security Check Failed" in resp.data
 
-def test_valid_csrf_token_in_form_accepted(csrf_client):
-    """POST request with a valid csrf_token passes CSRF validation."""
+def test_valid_csrf_token_in_form_accepted(csrf_client, monkeypatch):
+    """POST request with a valid csrf_token passes CSRF validation without writing to production."""
     with csrf_client.session_transaction() as sess:
         sess['user'] = 'alice_dev'
         sess['token_version'] = 1
@@ -64,6 +65,13 @@ def test_valid_csrf_token_in_form_accepted(csrf_client):
     assert get_res.status_code == 200
     token = extract_csrf_token(get_res.get_data(as_text=True))
     assert token is not None
+
+    # Mock persistence in CSRF tests to prevent accidental database writes
+    mock_post_id = ObjectId()
+    mock_insert_post = MagicMock(return_value=MagicMock(inserted_id=mock_post_id))
+    mock_insert_activity = MagicMock()
+    monkeypatch.setattr(posts, "insert_one", mock_insert_post)
+    monkeypatch.setattr(activities, "insert_one", mock_insert_activity)
 
     resp = csrf_client.post('/post/new', data={
         'title': 'Valid CSRF Story',
@@ -75,6 +83,8 @@ def test_valid_csrf_token_in_form_accepted(csrf_client):
     }, follow_redirects=False)
     # Valid post redirects to post detail (302), not 400
     assert resp.status_code == 302
+    assert mock_insert_post.called
+    assert mock_insert_activity.called
 
 def test_ajax_post_without_csrf_rejected_with_json_error(csrf_client):
     """AJAX POST without CSRF token returns 400 JSON error."""

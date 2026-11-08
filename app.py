@@ -51,7 +51,49 @@ else:
     app.secret_key = raw_secret.strip() if (raw_secret and raw_secret.strip()) else "dev_explicit_insecure_local_testing_key_32chars"
 
 app.config["SECRET_KEY"] = app.secret_key
-app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
+# Known production database and cluster identifiers for fail-fast isolation protection
+PROD_DATABASE_NAME = "blogDB"
+PROD_CLUSTER_FINGERPRINT = "cluster0.e3az295.mongodb.net"
+
+def normalize_mongo_cluster(raw_uri):
+    """Extract normalized host:port or cluster authority without credentials."""
+    if not raw_uri or not isinstance(raw_uri, str):
+        return None
+    p = urlparse(raw_uri.strip())
+    netloc = p.netloc
+    if '@' in netloc:
+        netloc = netloc.split('@')[1]
+    return netloc.lower()
+
+if IS_TESTING:
+    test_mongo_uri = os.environ.get("TEST_MONGO_URI")
+    if not test_mongo_uri or not test_mongo_uri.strip():
+        raise RuntimeError(
+            "FATAL SECURITY ERROR: Automated testing requires an explicit TEST_MONGO_URI. "
+            "Never run tests against default or production database."
+        )
+
+    parsed_test = urlparse(test_mongo_uri.strip())
+    test_db_name = parsed_test.path.lstrip('/')
+    if not test_db_name:
+        raise RuntimeError("FATAL SECURITY ERROR: TEST_MONGO_URI must include a target database name.")
+
+    if test_db_name == PROD_DATABASE_NAME:
+        raise RuntimeError(
+            f"FATAL SECURITY ERROR: TEST_MONGO_URI targets production database '{PROD_DATABASE_NAME}'. "
+            "Test database must be distinct from production."
+        )
+
+    test_cluster = normalize_mongo_cluster(test_mongo_uri)
+    if test_cluster == PROD_CLUSTER_FINGERPRINT.lower():
+        raise RuntimeError(
+            f"FATAL SECURITY ERROR: TEST_MONGO_URI targets production cluster '{PROD_CLUSTER_FINGERPRINT}'. "
+            "Automated tests must run on an isolated test cluster, regardless of database name."
+        )
+
+    app.config["MONGO_URI"] = test_mongo_uri.strip()
+else:
+    app.config["MONGO_URI"] = os.environ.get("MONGO_URI", "mongodb://localhost:27017/blogDB")
 
 # Session Cookie Hardening
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -915,52 +957,54 @@ def reset_token(token):
         client = mongo.cx
 
         try:
+            def _reset_txn_callback(db_session):
+                # 1. Atomically consume the submitted token inside the transaction
+                consumed = password_reset_tokens.find_one_and_update(
+                    {
+                        'token_hash': token_hash,
+                        'used': False,
+                        'expires_at': {'$gt': now}
+                    },
+                    {
+                        '$set': {'used': True, 'consumed_at': now}
+                    },
+                    session=db_session
+                )
+                if not consumed:
+                    raise ValueError("Invalid, expired, or already consumed token.")
+
+                # 2. Acquire user document and verify token_version for concurrency conflict protection
+                # Locking/conditional write on token_version ensures that if another concurrent request
+                # committed a reset, this transaction will abort on write conflict or matched_count == 0
+                current_token_version = user_doc.get('token_version', 1)
+                update_result = users.update_one(
+                    {
+                        '_id': user_doc['_id'],
+                        'token_version': current_token_version
+                    },
+                    {
+                        '$set': {'password': hash_pwd},
+                        '$inc': {'token_version': 1}
+                    },
+                    session=db_session
+                )
+                if update_result.matched_count == 0:
+                    raise ValueError("Concurrent password reset detected. Aborting transaction.")
+
+                # 3. Invalidate all remaining sibling reset tokens for this user inside the transaction
+                password_reset_tokens.update_many(
+                    {
+                        'user_id': str(user_doc['_id']),
+                        'used': False
+                    },
+                    {
+                        '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
+                    },
+                    session=db_session
+                )
+
             with client.start_session() as db_session:
-                with db_session.start_transaction():
-                    # 1. Atomically consume the submitted token inside the transaction
-                    consumed = password_reset_tokens.find_one_and_update(
-                        {
-                            'token_hash': token_hash,
-                            'used': False,
-                            'expires_at': {'$gt': now}
-                        },
-                        {
-                            '$set': {'used': True, 'consumed_at': now}
-                        },
-                        session=db_session
-                    )
-                    if not consumed:
-                        raise ValueError("Invalid, expired, or already consumed token.")
-
-                    # 2. Acquire user document and verify token_version for concurrency conflict protection
-                    # Locking/conditional write on token_version ensures that if another concurrent request
-                    # committed a reset, this transaction will abort on write conflict or matched_count == 0
-                    current_token_version = user_doc.get('token_version', 1)
-                    update_result = users.update_one(
-                        {
-                            '_id': user_doc['_id'],
-                            'token_version': current_token_version
-                        },
-                        {
-                            '$set': {'password': hash_pwd},
-                            '$inc': {'token_version': 1}
-                        },
-                        session=db_session
-                    )
-                    if update_result.matched_count == 0:
-                        raise ValueError("Concurrent password reset detected. Aborting transaction.")
-
-                    # 3. Invalidate all remaining sibling reset tokens for this user inside the transaction
-                    password_reset_tokens.update_many(
-                        {
-                            'user_id': str(user_doc['_id']),
-                            'used': False
-                        },
-                        {
-                            '$set': {'used': True, 'consumed_at': now, 'invalidated_reason': 'sibling_reset'}
-                        },
-                        session=db_session
-                    )
+                db_session.with_transaction(_reset_txn_callback)
 
         except Exception as e:
             print(f"Password reset transaction failed/aborted: {e}", flush=True)

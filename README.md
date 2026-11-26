@@ -69,7 +69,7 @@ Source: [results/final_comparison_2026-11-13.json](results/final_comparison_2026
 | **Confidence-Gated Hybrid** | 98.53% | 0.6319 | 0.8692 | 0.5401 | 0.0% |
 
 #### 2. Chunking Strategy Paired Comparison ($N=50$ Stratified Sample)
-Source: [results/chunking_stratified_ab_2026-11-23.json](results/chunking_stratified_ab_2026-11-23.json)
+Source: [results/chunking_stratified_ab_2026-11-23.json](results/chunking_stratified_ab_2026-11-23.json) *(Note: The chunking ablation evaluated `nvidia/nemotron-3.5-embed-8b` to avoid transient HTTP 504 gateway timeouts experienced on the NIM 1B endpoint during bulk offline evaluation; production serves with `nvidia/nemotron-3.5-embed-1b` for lower inference latency).*
 
 | Metric | Paragraph Chunking | Semantic Chunking | Paired Delta ($\Delta$) | Majority Class Delta (Chunk-Grounded) |
 | :--- | :---: | :---: | :---: | :---: |

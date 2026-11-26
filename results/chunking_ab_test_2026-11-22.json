@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-11-22 20:39:16",
+  "eval_working_size": 299,
+  "corpus_statistics": {
+    "paragraph": {
+      "total_chunks": 6176,
+      "avg_chunks_per_post": 28.33,
+      "avg_words_per_chunk": 29.3,
+      "min_words": 1,
+      "max_words": 179
+    },
+    "semantic": {
+      "total_chunks": 2000,
+      "avg_chunks_per_post": 9.17,
+      "avg_words_per_chunk": 90.5,
+      "min_words": 1,
+      "max_words": 250
+    }
+  },
+  "metrics_comparison": {
+    "paragraph_chunking": {
+      "faithfulness": NaN,
+      "answer_relevancy": NaN,
+      "context_precision": NaN,
+      "context_recall": NaN,
+      "mean_latency_seconds": 5.634
+    },
+    "semantic_chunking": {
+      "faithfulness": NaN,
+      "answer_relevancy": NaN,
+      "context_precision": NaN,
+      "context_recall": NaN,
+      "mean_latency_seconds": 8.592
+    },
+    "deltas_semantic_vs_paragraph": {
+      "faithfulness_delta": NaN,
+      "answer_relevancy_delta": NaN,
+      "context_precision_delta": NaN,
+      "context_recall_delta": NaN
+    }
+  }
+}

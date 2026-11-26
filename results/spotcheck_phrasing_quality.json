@@ -1,0 +1,100 @@
+[
+  {
+    "title": "Mastering Flask (Part 1)",
+    "tier": "Short (3 chunks)",
+    "question": "Why would a developer choose Flask over other frameworks?",
+    "ttft": 0.507,
+    "total_time": 0.595,
+    "retrieved_chunks": [
+      "<p>Flask is a lightweight WSGI web application framework. It is designed to make getting started quick and easy, with the ability to scale up to complex applications.</p>",
+      "<h3>Why Flask?</h3>",
+      "<ul>",
+      "<li>Simple and flexible</li>"
+    ],
+    "answer": "Flask is chosen for its simplicity and flexibility, fine-grained control, and strong community support."
+  },
+  {
+    "title": "Why Minimalist Design Wins",
+    "tier": "Short (2 chunks)",
+    "question": "Does minimalism mean just using white space and clean lines?",
+    "ttft": 0.421,
+    "total_time": 0.577,
+    "retrieved_chunks": [
+      "<p>In a world of noise, silence is a luxury. Visual noise is no different.</p>",
+      "<p>Minimalism isn't just about white space; it's about purpose. Every element must have a reason to exist.</p>",
+      "<img src=\"https://images.unsplash.com/photo-1507721999472-8ed4421c4af2?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80\" class=\"img-fluid\">",
+      "<p>Observe the clean lines and the focus on typography...</p>"
+    ],
+    "answer": "No, minimalism is about purpose and ensuring every element has a reason to exist, not just white space and clean lines."
+  },
+  {
+    "title": "Mastering Flask (Part 2)",
+    "tier": "Boundary (4 chunks)",
+    "question": "What role do Blueprints play in maintaining clean code in Flask?",
+    "ttft": 0.381,
+    "total_time": 0.673,
+    "retrieved_chunks": [
+      "<p>Once your application grows, you need to organize your code. Blueprints are the solution.</p>",
+      "<h3>What are Blueprints?</h3>",
+      "<p>A Blueprint is a way to organize a group of related views and other code. Rather than registering views and other code directly with an application, they are registered with a blueprint.</p>",
+      "<p>Let's dive into the code...</p>"
+    ],
+    "answer": "Blueprints play a key role in maintaining clean code in Flask by organizing a group of related views and other code, allowing them to be registered with a blueprint rather than directly with the application, which helps manage code organization as the application grows."
+  },
+  {
+    "title": "Hyper-local Communities",
+    "tier": "Boundary (5 chunks)",
+    "question": "What environmental benefits do hyper-local communities provide?",
+    "ttft": 1.345,
+    "total_time": 1.514,
+    "retrieved_chunks": [
+      "<h3>What are Hyper-local Communities?</h3>",
+      "<h3>The Benefits of Hyper-local Communities</h3>",
+      "<ul> <li><strong>Increased sense of community</strong>: Hyper-local communities foster a sense of belonging and connection among residents, which can lead to a greater sense of well-being and happiness.</li> <li><strong>Improved social connections</strong>: By building relationships with people in their neighborhood, residents can expand their social networks and build stronger, more meaningful connections with others.</li> <li><strong>Increased safety</strong>: Neighborhood watches and other forms of hyper-local community engagement can help to reduce crime and improve public safety.</li> <li><strong>Environmental benefits</strong>: Community gardens, food cooperatives, and other forms of hyper-local community engagement can help to reduce waste, promote sustainable living, and improve the overall health of the community.</li> <li><strong>Economic benefits</strong>: Cooperative businesses and other forms of hyper-local community engagement can help to stimulate local economic development and create jobs.</li> </ul>",
+      "<p>The rise of hyper-local communities is a response to the increasingly interconnected world we live in. As technology makes it easier for people to connect with others across the world, there's been a growing trend towards building relationships and connections within small geographic areas. Hyper-local communities offer a range of benefits, from increased sense of community and improved social connections to environmental and economic benefits. By building relationships and connections within a small geographic area, residents can create more livable, sustainable spaces that foster a sense of connection and belonging.</p>"
+    ],
+    "answer": "Hyper-local communities can help reduce waste, promote sustainable living, and improve the overall health of the community through initiatives like community gardens and food cooperatives."
+  },
+  {
+    "title": "Functional Fitness",
+    "tier": "Moderate (7 chunks)",
+    "question": "How does functional fitness differ from traditional bodybuilding isolation exercises?",
+    "ttft": 1.379,
+    "total_time": 1.753,
+    "retrieved_chunks": [
+      "<p>Functional fitness training has gained significant popularity over the past decade, and for good reason. Unlike traditional gym workouts that focus solely on isolated muscle groups, functional fitness training aims to improve real-world performance and everyday functionality. In this article, we'll delve into the world of functional fitness, exploring its benefits, key principles, and essential exercises.</p>",
+      "<h3>Essential Exercises for Functional Fitness</h3>",
+      "<p>Functional fitness training often incorporates a variety of exercises that mimic real-world activities. Some essential exercises include:</p>",
+      "<ul> <li>Squats: Squats are a fundamental exercise for functional fitness training, helping to build strength and power in the legs and glutes.</li> <li>Lunges: Lunges are another essential exercise for functional fitness training, helping to build strength and balance in the legs and hips.</li> <li>Step-ups: Step-ups are a great exercise for functional fitness training, helping to build strength and power in the legs and glutes.</li> <li>Carries: Carries, such as farmer's walks and suitcase carries, are a great exercise for functional fitness training, helping to build strength and endurance in the shoulders and core.</li> <li>Balance exercises: Balance exercises, such as single-leg squats and balance boards, are essential for functional fitness training, helping to improve coordination and balance.</li> </ul>"
+    ],
+    "answer": "Functional fitness differs from traditional bodybuilding isolation exercises by focusing on improving real-world performance and everyday functionality rather than targeting isolated muscle groups, as functional training emphasizes movement patterns that mimic daily activities and enhance overall coordination, balance, and power across multiple muscle groups simultaneously."
+  },
+  {
+    "title": "Quantum Entanglement",
+    "tier": "Long (15 chunks)",
+    "question": "Why was Albert Einstein skeptical of quantum entanglement?",
+    "ttft": 2.912,
+    "total_time": 3.552,
+    "retrieved_chunks": [
+      "<h3>What is Quantum Entanglement?</h3>",
+      "Quantum entanglement is a phenomenon in which two or more particles become correlated in such a way that the state of one particle cannot be described independently of the others, even when they are separated by large distances. This means that measuring the state of one particle will instantaneously affect the state of the other entangled particles, regardless of the distance between them. This phenomenon is often referred to as \"spooky action at a distance,\" a term coined by Albert Einstein.",
+      "<h3>Properties of Quantum Entanglement</h3>",
+      "* <blockquote>\"EPR Paradox\" (1935)</blockquote> Albert Einstein, Boris Podolsky, and Nathan Rosen proposed a thought experiment that showed the apparent absurdity of quantum mechanics. They argued that if two particles are entangled, then measuring the state of one particle would instantly affect the state of the other, violating the principles of relativity. * <blockquote>\"Bell's Theorem\" (1964)</blockquote> John Bell showed that quantum mechanics predicts a specific correlation between entangled particles, which can be tested experimentally. The results of these experiments have consistently confirmed the predictions of quantum mechanics. * <blockquote>\"Quantum Eraser Experiment\" (1999)</blockquote> Anton Zeilinger and his team performed an experiment that demonstrated the ability to retroactively change the state of a particle, even after it had been measured."
+    ],
+    "answer": "Albert Einstein was skeptical of quantum entanglement because he argued that if two particles are entangled, measuring the state of one would instantly affect the other, which he believed violated the principles of relativity."
+  },
+  {
+    "title": "Decentralized Finance (DeFi)",
+    "tier": "Long (15 chunks)",
+    "question": "How do smart contracts eliminate the need for banks in DeFi?",
+    "ttft": 2.364,
+    "total_time": 3.036,
+    "retrieved_chunks": [
+      "Decentralized finance, often abbreviated as DeFi, has been gaining momentum in recent years. It's a financial system that operates on blockchain technology, allowing for peer-to-peer transactions and smart contracts without the need for intermediaries like banks. The concept of DeFi is built on the idea of decentralization, where power is distributed among a network of computers rather than being controlled by a single entity.",
+      "<p>One of the key players in the DeFi space is Ethereum, a blockchain platform that allows for the creation of decentralized applications (dApps). Ethereum's smart contract functionality enables the creation of self-executing contracts that can automate various financial processes. This has led to the development of DeFi protocols like MakerDAO, Compound, and Aave, which provide lending and borrowing services to users.</p>",
+      "<p>This process is facilitated by smart contracts, which automate the entire process. The smart contracts are programmed to execute certain actions when specific conditions are met, such as when a user repays a loan or when a user withdraws their deposited funds.</p>",
+      "<ul> <li><strong>Disintermediation**: DeFi platforms eliminate the need for intermediaries like banks, reducing the role of traditional banking in financial transactions.</strong></li> <li><strong>Competition**: DeFi platforms offer a range of financial services that are often cheaper and more efficient than traditional banking services.</strong></li> <li><strong>Regulatory Challenges**: DeFi platforms often operate in a regulatory gray area, making it difficult for traditional banks to compete with them.</strong></li> </ul>"
+    ],
+    "answer": "Smart contracts automate financial processes by executing predefined actions when specific conditions are met, such as loan repayment or fund withdrawals, without requiring intermediaries like banks to oversee or facilitate the transactions."
+  }
+]

@@ -1,0 +1,93 @@
+[
+  {
+    "title": "Mastering Flask: Setting Up Your Environment (Part 1)",
+    "post_id": "6957aa580e6578be023f8b4d",
+    "chunks_count": 3,
+    "category": "Short (< top_k)",
+    "question": "What is Flask?",
+    "old_ttft": 0.351,
+    "new_cold_ttft": 0.448,
+    "new_warm_ttft": 0.521,
+    "old_answer": "Flask is a lightweight WSGI web application framework designed to make getting started quick and easy, with the ability to scale up to complex applications.",
+    "new_cold_answer": "Flask is a lightweight WSGI web application framework designed to make getting started quick and easy, with the ability to scale up to complex applications.",
+    "new_warm_answer": "Flask is a lightweight WSGI web application framework designed to make getting started quick and easy, with the ability to scale up to complex applications."
+  },
+  {
+    "title": "Why Minimalist Design Wins",
+    "post_id": "6957aa580e6578be023f8b50",
+    "chunks_count": 2,
+    "category": "Short (< top_k)",
+    "question": "What is the core idea of minimalist design?",
+    "old_ttft": 0.494,
+    "new_cold_ttft": 0.792,
+    "new_warm_ttft": 0.59,
+    "old_answer": "The core idea of minimalist design is that every element must have a reason to exist, focusing on purpose rather than just white space or clean lines.",
+    "new_cold_answer": "The core idea of minimalist design is that every element must have a reason to exist, focusing on purpose rather than just white space.",
+    "new_warm_answer": "The core idea of minimalist design is that every element must have a reason to exist, focusing on purpose rather than just white space."
+  },
+  {
+    "title": "Mastering Flask: Blueprints and Views (Part 2)",
+    "post_id": "6957aa580e6578be023f8b4e",
+    "chunks_count": 4,
+    "category": "Boundary (top_k=4)",
+    "question": "How do Blueprints help organize a Flask application?",
+    "old_ttft": 0.501,
+    "new_cold_ttft": 0.665,
+    "new_warm_ttft": 0.52,
+    "old_answer": "Blueprints help organize a Flask application by allowing related views and code to be grouped together and registered with the application as a unit rather than directly, enabling modular structure and easier management as the application grows.",
+    "new_cold_answer": "Blueprints help organize a Flask application by grouping related views and code together, allowing them to be registered with the application through the blueprint rather than directly with the app.",
+    "new_warm_answer": "Blueprints help organize a Flask application by grouping related views and code together, allowing them to be registered with the application rather than directly with it."
+  },
+  {
+    "title": "The Rise of Hyper-local Communities in a Globalized World",
+    "post_id": "69ca7d1515e1ce678fc1cd35",
+    "chunks_count": 5,
+    "category": "Boundary (5 chunks)",
+    "question": "Why are hyper-local communities becoming popular?",
+    "old_ttft": 0.55,
+    "new_cold_ttft": 1.472,
+    "new_warm_ttft": 0.768,
+    "old_answer": "Hyper-local communities are becoming popular because they foster a greater sense of community, improve social connections, increase safety, provide environmental benefits, and stimulate local economic development.",
+    "new_cold_answer": "Hyper-local communities are becoming popular because they offer increased sense of community, improved social connections, enhanced safety, environmental benefits, and economic development within small geographic areas.",
+    "new_warm_answer": "Hyper-local communities are becoming popular due to their benefits, including increased sense of community, improved social connections, enhanced safety, environmental advantages, and economic stimulation."
+  },
+  {
+    "title": "Functional Fitness: Training for the Real World",
+    "post_id": "69ca7e9f15e1ce678fc1cd44",
+    "chunks_count": 7,
+    "category": "Moderate (7 chunks)",
+    "question": "What is functional fitness?",
+    "old_ttft": 0.416,
+    "new_cold_ttft": 1.473,
+    "new_warm_ttft": 0.743,
+    "old_answer": "Functional fitness is training that improves real-world performance and everyday functionality by building strength, coordination, balance, mobility, and flexibility through multi-planar movements that mimic daily activities, rather than focusing on isolated muscle groups.",
+    "new_cold_answer": "Functional fitness training aims to improve real-world performance and everyday functionality, unlike traditional gym workouts that focus on isolated muscle groups.",
+    "new_warm_answer": "Functional fitness training aims to improve real-world performance and everyday functionality, focusing on movements that translate to daily activities rather than isolated muscle groups."
+  },
+  {
+    "title": "Quantum Entanglement Explained: Spooky Action at a Distance",
+    "post_id": "69cb81eb509748ca27859f77",
+    "chunks_count": 15,
+    "category": "Long (15 chunks)",
+    "question": "What did Einstein call quantum entanglement?",
+    "old_ttft": 0.433,
+    "new_cold_ttft": 2.422,
+    "new_warm_ttft": 0.919,
+    "old_answer": "Einstein called quantum entanglement \"spooky action at a distance.\"",
+    "new_cold_answer": "Einstein called quantum entanglement \"spooky action at a distance.\"",
+    "new_warm_answer": "Einstein called quantum entanglement \"spooky action at a distance.\""
+  },
+  {
+    "title": "Decentralized Finance: Is it the End of Traditional Banking?",
+    "post_id": "69ca802615e1ce678fc1cd47",
+    "chunks_count": 15,
+    "category": "Long (15 chunks)",
+    "question": "What is the primary promise of Decentralized Finance (DeFi)?",
+    "old_ttft": 0.417,
+    "new_cold_ttft": 2.391,
+    "new_warm_ttft": 0.741,
+    "old_answer": "The primary promise of Decentralized Finance (DeFi) is to provide financial services to people who have been excluded from traditional banking systems.",
+    "new_cold_answer": "The primary promise of Decentralized Finance (DeFi) is to enable peer-to-peer financial transactions and smart contracts without intermediaries like banks, operating on blockchain technology with distributed power rather than centralized control.",
+    "new_warm_answer": "The primary promise of Decentralized Finance (DeFi) is enabling peer-to-peer transactions and smart contracts without intermediaries like banks, distributing power across a network of computers rather than a single entity."
+  }
+]

@@ -1,0 +1,128 @@
+{
+  "timestamp": "2026-11-24 17:10:35",
+  "sample_size": 50,
+  "embedding_model": "nvidia/nemotron-3.5-embed-8b",
+  "paragraph_chunking": {
+    "faithfulness": {
+      "mean": 0.8776,
+      "valid_count": 50,
+      "total_count": 50,
+      "completion_rate": 1.0
+    },
+    "answer_relevancy": {
+      "mean": 0.5784,
+      "valid_count": 50,
+      "total_count": 50,
+      "completion_rate": 1.0
+    },
+    "context_precision": {
+      "mean": 0.5817,
+      "valid_count": 50,
+      "total_count": 50,
+      "completion_rate": 1.0
+    },
+    "context_recall": {
+      "mean": 0.925,
+      "valid_count": 50,
+      "total_count": 50,
+      "completion_rate": 1.0
+    }
+  },
+  "semantic_chunking": {
+    "faithfulness": {
+      "mean": 0.8844,
+      "valid_count": 49,
+      "total_count": 50,
+      "completion_rate": 0.98
+    },
+    "answer_relevancy": {
+      "mean": null,
+      "valid_count": 0,
+      "total_count": 50,
+      "completion_rate": 0.0
+    },
+    "context_precision": {
+      "mean": 0.6867,
+      "valid_count": 50,
+      "total_count": 50,
+      "completion_rate": 1.0
+    },
+    "context_recall": {
+      "mean": 0.919,
+      "valid_count": 50,
+      "total_count": 50,
+      "completion_rate": 1.0
+    }
+  },
+  "paired_deltas": {
+    "faithfulness": {
+      "paired_valid_count": 49,
+      "paragraph_paired_mean": 0.8781,
+      "semantic_paired_mean": 0.8844,
+      "delta_semantic_minus_paragraph": 0.0063
+    },
+    "context_precision": {
+      "paired_valid_count": 50,
+      "paragraph_paired_mean": 0.5817,
+      "semantic_paired_mean": 0.6867,
+      "delta_semantic_minus_paragraph": 0.105
+    },
+    "context_recall": {
+      "paired_valid_count": 50,
+      "paragraph_paired_mean": 0.925,
+      "semantic_paired_mean": 0.919,
+      "delta_semantic_minus_paragraph": -0.006
+    }
+  },
+  "category_breakdown": {
+    "chunk_grounded": {
+      "count": 38,
+      "paragraph_faithfulness": 0.937,
+      "semantic_faithfulness": 0.973,
+      "paragraph_relevancy": 0.6478,
+      "semantic_relevancy": NaN,
+      "paragraph_precision": 0.655,
+      "semantic_precision": 0.7478,
+      "paragraph_recall": 0.9737,
+      "semantic_recall": 1.0
+    },
+    "exact_entity": {
+      "count": 4,
+      "paragraph_faithfulness": 1.0,
+      "semantic_faithfulness": 0.7917,
+      "paragraph_relevancy": 0.5394,
+      "semantic_relevancy": NaN,
+      "paragraph_precision": 0.6111,
+      "semantic_precision": 0.7708,
+      "paragraph_recall": 1.0,
+      "semantic_recall": 0.75
+    },
+    "out_of_corpus": {
+      "count": 4,
+      "paragraph_faithfulness": 0.25,
+      "semantic_faithfulness": 0.25,
+      "paragraph_relevancy": 0.0,
+      "semantic_relevancy": NaN,
+      "paragraph_precision": 0.0,
+      "semantic_precision": 0.0,
+      "paragraph_recall": 0.75,
+      "semantic_recall": 0.5
+    },
+    "multi_concept": {
+      "count": 4,
+      "paragraph_faithfulness": 0.8186,
+      "semantic_faithfulness": 0.7917,
+      "paragraph_relevancy": 0.5362,
+      "semantic_relevancy": NaN,
+      "paragraph_precision": 0.4375,
+      "semantic_precision": 0.7083,
+      "paragraph_recall": 0.5625,
+      "semantic_recall": 0.7375
+    }
+  },
+  "runtime_seconds": {
+    "paragraph_elapsed": 7165.9,
+    "semantic_elapsed": 9988.3,
+    "total_elapsed": 17154.2
+  }
+}

@@ -1,0 +1,69 @@
+idx,cat,post_id,top1_sim,recall,precision,faithfulness,q
+0,chunk_grounded,69cb7a1d509748ca27859f28,0.6567,1.0,0.8055555555287036,1.0,What is a consequence of social media-driven polarization de
+1,chunk_grounded,69ca839be445ede5228e5dda,0.6419,1.0,0.7499999999625,1.0,What is one of the most significant benefits of social media
+2,chunk_grounded,69cb7b7b509748ca27859f38,0.7165,1.0,0.5833333333041666,0.5,What is the goal of Rust's concurrency model?
+3,chunk_grounded,69ca8707e445ede5228e5df3,0.6924,1.0,0.6388888888675925,1.0,What survey is referenced regarding the most affordable citi
+4,chunk_grounded,69ca8857e445ede5228e5dff,0.519,1.0,0.249999999975,1.0,"What types of movements do games such as tag, capture the fl"
+5,chunk_grounded,69ca8871e445ede5228e5e01,0.7169,1.0,0.6388888888675925,0.8571428571428571,Will AI replace human developers in web development?
+6,chunk_grounded,69ca89fae445ede5228e5e16,0.4508,1.0,0.7499999999625,1.0,"What does the text describe rest as, beyond being a necessit"
+7,chunk_grounded,69cb7b25509748ca27859f34,0.684,1.0,0.499999999975,1.0,How would you describe the current stage of the search for l
+8,chunk_grounded,69ca87b8e445ede5228e5dfb,0.5858,1.0,0.999999999975,1.0,What can happen if social media platforms spread disinformat
+9,chunk_grounded,69ca8a19e445ede5228e5e18,0.7038,1.0,0.9166666666361112,1.0,What are scientists actively searching for on exoplanets to 
+10,chunk_grounded,69ca8871e445ede5228e5e01,0.5149,1.0,0.249999999975,1.0,In which types of applications is the limitation of AI-gener
+11,chunk_grounded,69cb8214509748ca27859f78,0.447,1.0,0.49999999995,1.0,What should you do after identifying your goals and habits t
+12,chunk_grounded,69cb7cf8509748ca27859f4a,0.6131,1.0,0.7499999999625,1.0,How many hours of sleep does the National Sleep Foundation r
+13,chunk_grounded,69cb8214509748ca27859f78,0.5039,1.0,0.7499999999625,1.0,What approach does the text recommend for building new habit
+14,chunk_grounded,69ca8707e445ede5228e5df3,0.6728,1.0,0.249999999975,1.0,Why is digital nomadism described as a cost-effective way to
+15,chunk_grounded,69cb7b1b509748ca27859f33,0.7556,1.0,0.499999999975,1.0,How has social media democratized information according to t
+16,chunk_grounded,69ca89fae445ede5228e5e16,0.5718,1.0,0.249999999975,1.0,What benefit does prioritizing sleep and optimizing rest pro
+17,chunk_grounded,69cb7cf8509748ca27859f4a,0.595,1.0,0.9999999999,0.8,Why is sleep quality considered critical alongside sleep dur
+18,chunk_grounded,69ca87b8e445ede5228e5dfb,0.73,1.0,0.4166666666458333,1.0,What does the future of social media and democracy depend on
+19,chunk_grounded,69cb8214509748ca27859f78,0.59,1.0,0.249999999975,1.0,What is the key to designing your day according to the text?
+20,chunk_grounded,69ca8a19e445ede5228e5e18,0.3898,1.0,0.249999999975,1.0,What type of star does Kepler-452b orbit and what is its orb
+21,chunk_grounded,69ca87b8e445ede5228e5dfb,0.6794,1.0,0.6388888888675925,1.0,What concern does the text raise about social media's impact
+22,chunk_grounded,69cb7e0a509748ca27859f55,0.7778,1.0,0.999999999975,1.0,What are the consequences of not getting enough sleep?
+23,chunk_grounded,69ca8707e445ede5228e5df3,0.6818,1.0,0.5833333333041666,1.0,What social challenges do digital nomads commonly experience
+24,chunk_grounded,69cb7b6f509748ca27859f37,0.6581,1.0,0.999999999975,1.0,What impact has CRISPR had on the field of genetics?
+25,chunk_grounded,69cb7d7b509748ca27859f50,0.574,1.0,0.3333333333,1.0,Why does Thoreau suggest limiting one's affairs to a small n
+26,chunk_grounded,69cb7b6f509748ca27859f37,0.6563,0.0,0.9999999999,1.0,Who must collaborate to ensure CRISPR is used responsibly?
+27,chunk_grounded,69ca839be445ede5228e5dda,0.6374,1.0,0.9999999999,1.0,How has social media empowered citizens according to the exc
+28,chunk_grounded,69cb8036509748ca27859f68,0.4879,1.0,0.5833333333041666,1.0,"When was the James Webb Space Telescope launched, and how do"
+29,chunk_grounded,69cb7cad509748ca27859f47,0.7967,1.0,0.999999999975,1.0,Will traditional banks need to change due to DeFi's growth?
+30,chunk_grounded,69cb7d7b509748ca27859f50,0.4349,1.0,0.49999999995,1.0,What core principle does Thoreau emphasize in the excerpt?
+31,chunk_grounded,69cb8214509748ca27859f78,0.8109,1.0,0.499999999975,1.0,What is the first step in designing your day to create posit
+32,chunk_grounded,69cb7ebe509748ca27859f5b,0.4852,1.0,0.5833333333041666,1.0,What does acceptance involve according to the text?
+33,chunk_grounded,69cb82f1509748ca27859f7f,0.5707,1.0,0.9999999999,1.0,Where do digital nomads typically work?
+34,chunk_grounded,69cb7cda509748ca27859f49,0.633,1.0,0.8333333332916666,1.0,Which values are increasingly being valued in relation to re
+35,chunk_grounded,69ca8a19e445ede5228e5e18,0.4561,1.0,0.3333333333,1.0,"Which star does Proxima b orbit, and how is that star relate"
+36,chunk_grounded,69cb8163509748ca27859f72,0.6149,1.0,0.49999999995,1.0,How can optimizing algorithms help minimize the environmenta
+37,chunk_grounded,69cb82f1509748ca27859f7f,0.6782,1.0,0.99999999995,1.0,What is digital nomadism?
+38,chunk_grounded,69cb8036509748ca27859f68,0.4943,1.0,0.8333333332916666,1.0,What capabilities does the James Webb Space Telescope have f
+39,chunk_grounded,69cb7b1b509748ca27859f33,0.5735,1.0,0.49999999995,1.0,"What role did social media play during the Arab Spring, as d"
+40,chunk_grounded,69cb7ebe509748ca27859f5b,0.5623,1.0,0.5833333333041666,1.0,"How does accepting the present moment benefit us, according "
+41,chunk_grounded,69cb8163509748ca27859f72,0.5304,1.0,0.249999999975,1.0,"Why should software systems be designed to be recyclable, re"
+42,chunk_grounded,69ca8929e445ede5228e5e0c,0.5849,1.0,0.249999999975,0.875,What is the Stoic concept of 'the indifferent' and what does
+43,chunk_grounded,69cb7b1b509748ca27859f33,0.525,1.0,0.49999999995,1.0,According to the Harvard Kennedy School study mentioned in t
+44,chunk_grounded,69cb8019509748ca27859f67,0.7359,1.0,0.6388888888675925,1.0,What outcome results from applying these Stoic principles to
+45,chunk_grounded,69cb7cad509748ca27859f47,0.7773,1.0,0.999999999975,1.0,What impact does the rise of DeFi have on traditional bankin
+46,chunk_grounded,69cb7cda509748ca27859f49,0.5804,1.0,0.9999999999666668,1.0,What does the rise of digital nomadism highlight the need fo
+47,chunk_grounded,69cb8019509748ca27859f67,0.8992,1.0,0.999999999975,1.0,What tools and principles does Stoic philosophy offer for na
+48,chunk_grounded,69ca8707e445ede5228e5df3,0.5972,1.0,0.6388888888675925,1.0,What administrative challenges do digital nomads face when w
+49,chunk_grounded,69cb7ebe509748ca27859f5b,0.2268,1.0,0.249999999975,1.0,What does the text identify as inevitable aspects of life?
+50,chunk_grounded,69ca842de445ede5228e5ddd,0.629,1.0,0.9166666666361112,1.0,What might future exploration of quantum mechanics reveal ab
+51,chunk_grounded,69cb7b25509748ca27859f34,0.4516,1.0,0.9999999999666668,1.0,What has sparked intense interest in the possibility of life
+52,chunk_grounded,69cb7ebe509748ca27859f5b,0.5433,1.0,0.249999999975,1.0,How should uncertainty and change be embraced according to t
+53,chunk_grounded,69ca842de445ede5228e5ddd,0.6804,1.0,0.999999999975,1.0,How does the text describe the impact of entanglement on our
+54,chunk_grounded,69cb7b1b509748ca27859f33,0.5784,1.0,0.8055555555287036,1.0,What concern does the text raise about social media's impact
+55,chunk_grounded,69ca8a26e445ede5228e5e19,0.7002,1.0,0.7499999999625,1.0,What does the text say about the validity of myths surroundi
+56,chunk_grounded,69ca8871e445ede5228e5e01,0.4844,1.0,0.999999999975,,What types of tasks will generative AI handle according to t
+57,chunk_grounded,69cb7e0a509748ca27859f55,0.6434,1.0,0.7499999999625,1.0,Do the benefits of sleep extend beyond avoiding health risks
+58,chunk_grounded,69cb7b6f509748ca27859f37,0.5522,1.0,0.4166666666458333,1.0,What is likely to increase as CRISPR becomes more widespread
+59,out_of_corpus,,0.2782,1.0,0.0,0.25,What is the recommended dosage of amoxicillin for treating b
+60,out_of_corpus,,-0.0612,1.0,0.0,1.0,Who won the FIFA Men's World Cup in 1998 and who scored in t
+61,out_of_corpus,,-0.01,1.0,0.0,0.0,What is the capital city of Mongolia and what is its currenc
+62,out_of_corpus,,0.2693,1.0,0.0,1.0,What recipe does Alice recommend for baking sourdough bread 
+63,exact_entity,69cb7e23509748ca27859f56,0.4745,1.0,0.9999999999,1.0,Which specific gene editing technology uses the Cas9 enzyme?
+64,exact_entity,6957aa580e6578be023f8b4d,0.542,1.0,0.99999999995,1.0,"What WSGI microframework is described as lightweight, flexib"
+65,exact_entity,general_app_tech,0.5847,1.0,0.9999999999,0.5,What specific sanitization library is used in FlaskBlog to c
+66,exact_entity,security_hardening,0.4413,1.0,0.9999999999,0.0,What is the exact password hashing algorithm adopted during 
+67,multi_concept,69cb7e23509748ca27859f56,0.7151,1.0,0.249999999975,1.0,What are both the key benefits and the ethical concerns rais

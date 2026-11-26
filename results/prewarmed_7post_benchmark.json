@@ -1,0 +1,65 @@
+[
+  {
+    "title": "Mastering Flask: Setting Up Your Environment (Part 1)",
+    "post_id": "6957aa580e6578be023f8b4d",
+    "category": "Short (3 chunks)",
+    "question": "What is Flask?",
+    "first_question_ttft": 0.401,
+    "total_time": 0.576,
+    "answer": "Flask is a lightweight WSGI web application framework designed to make getting started quick and easy, with the ability to scale up to complex applications."
+  },
+  {
+    "title": "Why Minimalist Design Wins",
+    "post_id": "6957aa580e6578be023f8b50",
+    "category": "Short (2 chunks)",
+    "question": "What is the core idea of minimalist design?",
+    "first_question_ttft": 0.368,
+    "total_time": 0.496,
+    "answer": "The core idea of minimalist design is that every element must have a reason to exist, focusing on purpose rather than just white space."
+  },
+  {
+    "title": "Mastering Flask: Blueprints and Views (Part 2)",
+    "post_id": "6957aa580e6578be023f8b4e",
+    "category": "Boundary (4 chunks)",
+    "question": "How do Blueprints help organize a Flask application?",
+    "first_question_ttft": 0.365,
+    "total_time": 0.535,
+    "answer": "Blueprints help organize a Flask application by grouping related views and code together, allowing them to be registered with the application through the blueprint rather than directly with the app."
+  },
+  {
+    "title": "The Rise of Hyper-local Communities in a Globalized World",
+    "post_id": "69ca7d1515e1ce678fc1cd35",
+    "category": "Boundary (5 chunks)",
+    "question": "Why are hyper-local communities becoming popular?",
+    "first_question_ttft": 0.796,
+    "total_time": 0.985,
+    "answer": "Hyper-local communities are becoming popular because they offer increased sense of community, improved social connections, enhanced safety, environmental benefits, and economic development within small geographic areas."
+  },
+  {
+    "title": "Functional Fitness: Training for the Real World",
+    "post_id": "69ca7e9f15e1ce678fc1cd44",
+    "category": "Moderate (7 chunks)",
+    "question": "What is functional fitness?",
+    "first_question_ttft": 0.877,
+    "total_time": 1.017,
+    "answer": "Functional fitness is training that improves real-world performance and everyday functionality, focusing on movements that mimic daily activities rather than isolated muscle groups."
+  },
+  {
+    "title": "Quantum Entanglement Explained: Spooky Action at a Distance",
+    "post_id": "69cb81eb509748ca27859f77",
+    "category": "Long (15 chunks)",
+    "question": "What did Einstein call quantum entanglement?",
+    "first_question_ttft": 0.843,
+    "total_time": 0.979,
+    "answer": "Einstein called quantum entanglement \"spooky action at a distance.\""
+  },
+  {
+    "title": "Decentralized Finance: Is it the End of Traditional Banking?",
+    "post_id": "69ca802615e1ce678fc1cd47",
+    "category": "Long (15 chunks)",
+    "question": "What is the primary promise of Decentralized Finance (DeFi)?",
+    "first_question_ttft": 0.915,
+    "total_time": 1.14,
+    "answer": "The primary promise of Decentralized Finance (DeFi) is to operate as a financial system on blockchain technology that enables peer-to-peer transactions and smart contracts without intermediaries like banks, distributing power across a network rather than a single entity."
+  }
+]

@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from services.ai_service import answer_question, chunk_text
 
 
-def retrieve_and_answer(question: str, context: str) -> dict:
+def retrieve_and_answer(question: str, context: str, retriever_fn=None, chunker_fn=None) -> dict:
     """
     Run the live FlaskBlog RAG pipeline for one (question, blog-context) pair.
 
@@ -33,15 +33,16 @@ def retrieve_and_answer(question: str, context: str) -> dict:
           "retrieved_chunks":  list[str],  # the chunks fed to the LLM
         }
     """
-    # Run the real grounded-QA call. It now performs semantic top-k retrieval
+    # Run the real grounded-QA call. It now performs top-k retrieval
     # internally and reports back exactly which chunks it used.
-    result = answer_question(context, question)
+    result = answer_question(context, question, retriever_fn=retriever_fn, chunker_fn=chunker_fn)
 
     # The chunks the LLM actually saw (retrieved subset). Fall back to full
     # chunking only if an older code path didn't report them.
     retrieved_chunks = result.get("retrieved_chunks")
     if not retrieved_chunks:
-        retrieved_chunks = chunk_text(context)
+        fallback_chunker = chunker_fn or chunk_text
+        retrieved_chunks = fallback_chunker(context)
 
     # 3. answer_question returns a structured dict (summary points + insight).
     #    RAGAS wants ONE string, so flatten it the same way the UI renders it.

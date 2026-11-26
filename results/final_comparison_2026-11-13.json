@@ -1,0 +1,120 @@
+{
+  "timestamp": "2026-11-16 19:55:00",
+  "dataset": "eval/eval_working.jsonl",
+  "dataset_size": 68,
+  "judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "embedding_model": "nvidia/nemotron-3.5-embed-1b",
+  "architecture_decision": {
+    "adopted": "unconditional_hybrid",
+    "retriever": "dense_semantic_plus_bm25_plus_rrf_fusion",
+    "function": "services.ai_service.retrieve_chunks",
+    "confidence_gated_status": "evaluated_not_adopted",
+    "rationale": "Unconditional hybrid achieves 100.0% context recall across the benchmark (68/68) with 0.9697 faithfulness under clean prompt evaluation, while gated hybrid inherits semantic-only recall loss (98.53%) and exhibited an unresolved faithfulness anomaly (0.8692) during testing."
+  },
+  "historical_retry_rate_investigation": {
+    "bug_description": "In services/ai_service.py, client.chat.completions.create() lacked extra_body={'reasoning_budget': 0}. The reasoning model consumed its output token limit on internal reasoning tokens, returning content=None on Attempt 1. The retry block then substituted an ungrounded prompt ('Answer the question short and clearly. Do not refuse.') that stripped all negative-grounding and refusal rules.",
+    "historical_runs": [
+      {
+        "configuration": "Semantic-Only Baseline",
+        "step_id": "3641 / 4990",
+        "total_queries": 68,
+        "attempt_1_retries": 62,
+        "retry_rate_percent": 91.2
+      },
+      {
+        "configuration": "Unconditional Hybrid",
+        "step_id": "3948 / 4998",
+        "total_queries": 68,
+        "attempt_1_retries": 66,
+        "retry_rate_percent": 97.1
+      },
+      {
+        "configuration": "BM25-Only",
+        "step_id": "5025",
+        "total_queries": 68,
+        "attempt_1_retries": 64,
+        "retry_rate_percent": 94.1
+      },
+      {
+        "configuration": "Confidence-Gated Hybrid (First Run)",
+        "step_id": "5320",
+        "total_queries": 68,
+        "attempt_1_retries": 61,
+        "retry_rate_percent": 89.7
+      },
+      {
+        "configuration": "Clean Production Code (Post-Fix)",
+        "step_id": "5650",
+        "total_queries": 68,
+        "attempt_1_retries": 0,
+        "retry_rate_percent": 0.0
+      }
+    ]
+  },
+  "clean_four_way_comparison": {
+    "semantic_only": {
+      "retrieval_strategy": "Dense semantic cosine similarity (top-k=4)",
+      "generation_retry_rate_percent": 0.0,
+      "context_recall": 0.9853,
+      "context_precision": 0.6319,
+      "faithfulness": 0.9634,
+      "answer_relevancy": 0.5431,
+      "valid_counts": {
+        "faithfulness": 67,
+        "answer_relevancy": 68,
+        "context_precision": 68,
+        "context_recall": 68
+      },
+      "avg_latency_seconds": 6.82
+    },
+    "bm25_only": {
+      "retrieval_strategy": "BM25Okapi lexical matching (top-k=4)",
+      "generation_retry_rate_percent": 0.0,
+      "context_recall": 0.9104,
+      "context_precision": 0.5846,
+      "faithfulness": 0.8956,
+      "answer_relevancy": 0.5314,
+      "valid_counts": {
+        "faithfulness": 67,
+        "answer_relevancy": 68,
+        "context_precision": 66,
+        "context_recall": 67
+      },
+      "avg_latency_seconds": 4.21
+    },
+    "unconditional_hybrid": {
+      "retrieval_strategy": "Dense semantic + BM25Okapi + Reciprocal Rank Fusion (k=60, top-k=4)",
+      "generation_retry_rate_percent": 0.0,
+      "context_recall": 1.0000,
+      "context_precision": 0.6156,
+      "faithfulness": 0.9697,
+      "answer_relevancy": 0.5317,
+      "valid_counts": {
+        "faithfulness": 68,
+        "answer_relevancy": 68,
+        "context_precision": 68,
+        "context_recall": 68
+      },
+      "avg_latency_seconds": 6.89
+    },
+    "confidence_gated_hybrid": {
+      "retrieval_strategy": "Semantic primary with hybrid fallback if top1_sim < 0.45",
+      "generation_retry_rate_percent": 0.0,
+      "context_recall": 0.9853,
+      "context_precision": 0.6319,
+      "faithfulness": 0.8692,
+      "answer_relevancy": 0.6164,
+      "valid_counts": {
+        "faithfulness": 23,
+        "answer_relevancy": 23,
+        "context_precision": 23,
+        "context_recall": 23
+      },
+      "avg_latency_seconds": 6.89,
+      "fallback_rate": "4 / 68 queries (5.9%)",
+      "status": "evaluated_not_adopted",
+      "caveat": "Gated retrieval was evaluated but not adopted due to an unresolved anomaly in its faithfulness score (0.8692 on the evaluated subset), which came out lower than both underlying components. It is omitted from production."
+    }
+  },
+  "notes": "Confidence-gated retrieval was evaluated as an experimental optimization but is not being adopted. Its faithfulness score (0.8692) came out anomalously lower than both of its own underlying components (semantic 0.9634, hybrid 0.9697) during evaluation and was never fully explained with row-level rigor. Leaving unverified gating logic in production carries architectural risk. Unconditional hybrid retrieval (dense + BM25 + RRF) provides 100.0% context recall with high faithfulness (0.9697) and minimal latency overhead (~6.89s), and is adopted as the final production retriever."
+}

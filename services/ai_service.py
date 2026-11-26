@@ -1,6 +1,7 @@
 import os
 import requests
 import traceback
+import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -10,7 +11,7 @@ load_dotenv()
 AI_API_KEY = os.environ.get("AI_API_KEY")
 AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://integrate.api.nvidia.com/v1")
 AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-3.2-nv-embedqa-1b-v1")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/nemotron-3.5-embed-1b")
 
 # Tavily Configuration
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
@@ -22,11 +23,18 @@ if not TAVILY_API_KEY:
 
 AI_TIMEOUT = float(os.environ.get("AI_TIMEOUT", "25.0"))
 
+# Persistent HTTP transport to eliminate per-request TCP/TLS handshake latency
+_http_client = httpx.Client(
+    timeout=AI_TIMEOUT,
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
+)
+
 client = OpenAI(
     base_url=AI_BASE_URL,
     api_key=AI_API_KEY or "missing",
     timeout=AI_TIMEOUT,
-    max_retries=1
+    max_retries=1,
+    http_client=_http_client
 )
 
 RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "4"))
@@ -48,16 +56,37 @@ def _format_ai_error(e):
 
 import re
 import math
+from search.fusion import fuse_rankings
+from search.bm25_index import rank_local_chunks_bm25
+
+
+from concurrent.futures import ThreadPoolExecutor
+
+# ThreadPoolExecutor for concurrent passage embedding requests
+_embed_pool = ThreadPoolExecutor(max_workers=4)
+
+
+def _embed_single(text, input_type):
+    """Embeds a single string with specific input_type."""
+    resp = client.embeddings.create(
+        model=EMBED_MODEL,
+        input=[text],
+        extra_body={"input_type": input_type, "truncate": "END"},
+    )
+    return resp.data[0].embedding
 
 
 def _embed(texts, input_type):
-    """Embed a list of strings via the NVIDIA endpoint. Returns list[list[float]]."""
-    resp = client.embeddings.create(
-        model=EMBED_MODEL,
-        input=texts,
-        extra_body={"input_type": input_type, "truncate": "END"},
-    )
-    return [d.embedding for d in resp.data]
+    """
+    Embed a list of strings via the NVIDIA endpoint concurrently.
+    Uses concurrent single-text calls to prevent NVIDIA NIM asymmetric model batch 500 errors.
+    """
+    if not texts:
+        return []
+    if len(texts) == 1:
+        return [_embed_single(texts[0], input_type)]
+    # Concurrently fetch embeddings across the pool
+    return list(_embed_pool.map(lambda t: _embed_single(t, input_type), texts))
 
 
 def _cosine(a, b):
@@ -70,20 +99,13 @@ def _cosine(a, b):
     return dot / (na * nb)
 
 
-def retrieve_chunks(question, chunks, top_k=RETRIEVAL_TOP_K):
+def retrieve_chunks_semantic(question, chunks, top_k=RETRIEVAL_TOP_K):
     """
-    Semantic top-k retrieval. Embeds the question and every chunk, then returns
-    the most relevant chunks as (original_index, chunk_text) pairs, sorted by
-    similarity. Original indices are preserved so citations still point to the
-    true position in the article.
-
-    Graceful fallback: if there are few chunks, or embeddings fail (quota/network),
-    fall back to returning all chunks in order so the pipeline never crashes.
+    Semantic-only top-k retrieval (Baseline). Embeds the question and every chunk,
+    computes cosine similarity, and returns top_k chunks.
     """
     if not chunks:
         return []
-
-    # Not worth an embedding round-trip if everything fits anyway.
     if len(chunks) <= top_k:
         return list(enumerate(chunks))
 
@@ -91,17 +113,152 @@ def retrieve_chunks(question, chunks, top_k=RETRIEVAL_TOP_K):
         q_vec = _embed([question], input_type="query")[0]
         chunk_vecs = _embed(chunks, input_type="passage")
         scored = [
-            (i, chunks[i], _cosine(q_vec, chunk_vecs[i]))
+            (i, _cosine(q_vec, chunk_vecs[i]))
             for i in range(len(chunks))
         ]
-        scored.sort(key=lambda x: x[2], reverse=True)
-        top = scored[:top_k]
-        # Keep the article's natural order among the selected chunks for readability.
-        top.sort(key=lambda x: x[0])
-        return [(i, c) for (i, c, _score) in top]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        top_indices = [idx for idx, _score in scored[:top_k]]
+        top_indices.sort()
+        return [(idx, chunks[idx]) for idx in top_indices]
     except Exception as e:
-        print(f"AI WARN (retrieval fell back to all chunks): {e}", flush=True)
+        print(f"AI WARN (semantic retrieval failed, falling back to order): {e}", flush=True)
+        return list(enumerate(chunks[:top_k]))
+
+
+def retrieve_chunks_bm25(question, chunks, top_k=RETRIEVAL_TOP_K):
+    """
+    BM25-only top-k retrieval (Sparse baseline).
+    Scores local chunks using BM25Okapi and returns the top_k chunks.
+    """
+    if not chunks:
+        return []
+    if len(chunks) <= top_k:
         return list(enumerate(chunks))
+
+    sparse_ranked = rank_local_chunks_bm25(question, chunks)
+    # sparse_ranked is list of (original_idx, chunk_text, score) sorted descending
+    top_bm25 = [idx for (idx, _text, score) in sparse_ranked[:top_k]]
+    top_indices = sorted(top_bm25)
+    return [(idx, chunks[idx]) for idx in top_indices]
+
+
+# In-memory cache for per-post chunk index (chunks, embeddings, BM25)
+# Keyed by post_id (or post_id + updated_at timestamp)
+_POST_CHUNK_CACHE = {}
+
+def invalidate_post_chunk_cache(post_id=None):
+    """Invalidates the in-memory chunk embedding/BM25 cache for a specific post or all posts."""
+    global _POST_CHUNK_CACHE
+    if post_id is not None:
+        _POST_CHUNK_CACHE.pop(str(post_id), None)
+    else:
+        _POST_CHUNK_CACHE.clear()
+
+def prewarm_post_chunk_cache(post_id, content, async_mode=True):
+    """
+    Chunks post content and pre-computes dense chunk embeddings into _POST_CHUNK_CACHE.
+    If async_mode is True, executes in a background thread to prevent adding perceptible
+    latency to user-facing publish/edit responses.
+    """
+    if not post_id or not content:
+        return
+
+    def _warm():
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(content, 'html.parser')
+            clean_text = soup.get_text()
+            chunks = chunk_text(clean_text)
+            if not chunks:
+                return
+            
+            # Short posts with <= RETRIEVAL_TOP_K chunks are short-circuited anyway
+            if len(chunks) <= RETRIEVAL_TOP_K:
+                _POST_CHUNK_CACHE[str(post_id)] = {
+                    "chunks": chunks,
+                    "chunk_vecs": None
+                }
+                return
+
+            # Compute and store chunk vectors
+            chunk_vecs = _embed(chunks, input_type="passage")
+            _POST_CHUNK_CACHE[str(post_id)] = {
+                "chunks": chunks,
+                "chunk_vecs": chunk_vecs
+            }
+        except Exception as e:
+            print(f"AI WARN (Failed to pre-warm chunk cache for post {post_id}): {e}", flush=True)
+
+    if async_mode:
+        _embed_pool.submit(_warm)
+    else:
+        _warm()
+
+def retrieve_chunks(question, chunks, top_k=RETRIEVAL_TOP_K, post_id=None):
+    """
+    Hybrid (Dense Semantic + Sparse BM25) retrieval using Reciprocal Rank Fusion (RRF).
+    Embeds the question and chunks, scores via BM25 lexical matching, fuses rankings,
+    and returns the most relevant chunks as (original_index, chunk_text) pairs.
+    Original indices are preserved so citations still point to the true position in the article.
+
+    If post_id is provided, caches chunk embeddings and BM25 structures in memory so
+    subsequent questions on the same post do not repeat the chunk embedding network call.
+
+    Graceful fallback: if there are few chunks, or embeddings fail (quota/network),
+    falls back to BM25-only or natural order so the pipeline never crashes.
+    """
+    if not chunks:
+        return []
+
+    # Not worth an embedding/fusion round-trip if everything fits anyway.
+    if len(chunks) <= top_k:
+        return list(enumerate(chunks))
+
+    # Check cache for pre-computed chunk vectors and chunks
+    cached_entry = _POST_CHUNK_CACHE.get(str(post_id)) if post_id else None
+    if cached_entry and cached_entry.get("chunks") == chunks:
+        chunk_vecs = cached_entry.get("chunk_vecs")
+    else:
+        chunk_vecs = None
+
+    # 1. Lexical retrieval (BM25) over local chunks
+    sparse_ranked = rank_local_chunks_bm25(question, chunks)
+    sparse_results = [(idx, score) for (idx, _text, score) in sparse_ranked]
+
+    # 2. Dense semantic retrieval via embeddings
+    try:
+        q_vec = _embed([question], input_type="query")[0]
+        if chunk_vecs is None:
+            chunk_vecs = _embed(chunks, input_type="passage")
+            if post_id:
+                _POST_CHUNK_CACHE[str(post_id)] = {
+                    "chunks": chunks,
+                    "chunk_vecs": chunk_vecs
+                }
+
+        dense_results = [
+            (i, _cosine(q_vec, chunk_vecs[i]))
+            for i in range(len(chunks))
+        ]
+        dense_results.sort(key=lambda x: x[1], reverse=True)
+
+        # 3. Reciprocal Rank Fusion (RRF) with k=60
+        fused = fuse_rankings(dense_results, sparse_results, k=60)
+        top_indices = [idx for idx, _score in fused[:top_k]]
+
+        # Keep natural order of appearance in article for reading flow and citation consistency
+        top_indices.sort()
+        return [(idx, chunks[idx]) for idx in top_indices]
+
+    except Exception as e:
+        print(f"AI WARN (dense retrieval failed, falling back to BM25 or order): {e}", flush=True)
+        # Fall back to top BM25 matches
+        if sparse_results and any(score > 0 for _, score in sparse_results):
+            top_bm25 = [idx for idx, score in sparse_results if score > 0][:top_k]
+            top_bm25.sort()
+            return [(idx, chunks[idx]) for idx in top_bm25]
+        return list(enumerate(chunks))
+
 
 def summarize_text(text):
     """Generates a concise summary of the provided text with a grounded prompt (no RAG)."""
@@ -321,6 +478,59 @@ def chunk_text(text):
         paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
     return paragraphs
 
+
+def chunk_text_semantic(text, threshold: float = 0.45, min_words: int = 25, max_words: int = 250):
+    """
+    Splits text into semantically cohesive chunks using sentence-embedding similarity.
+    Computes cosine similarity between consecutive sentences; cuts chunk boundary
+    when similarity drops below threshold or max_words is exceeded.
+    """
+    if not text or not text.strip():
+        return []
+
+    # Clean multi-newlines and format
+    clean = re.sub(r'\r\n', '\n', text.strip())
+    # Split into candidate sentences
+    raw_sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', clean) if s.strip()]
+    if not raw_sentences:
+        return [clean]
+    if len(raw_sentences) == 1:
+        return raw_sentences
+
+    try:
+        # Embed sentences concurrently
+        vecs = _embed(raw_sentences, input_type="passage")
+    except Exception as e:
+        print(f"Warn: embedding failed in chunk_text_semantic ({e}), falling back to paragraph chunking", flush=True)
+        return chunk_text(text)
+
+    chunks = []
+    curr_sentences = [raw_sentences[0]]
+    curr_words = len(raw_sentences[0].split())
+
+    for i in range(1, len(raw_sentences)):
+        s_next = raw_sentences[i]
+        w_next = len(s_next.split())
+        sim = _cosine(vecs[i - 1], vecs[i])
+
+        # Decide whether to split:
+        # 1. Similarity drops below threshold and buffer already has min_words
+        # 2. Or adding next sentence exceeds max_words
+        should_split = (sim < threshold and curr_words >= min_words) or (curr_words + w_next > max_words)
+
+        if should_split:
+            chunks.append(" ".join(curr_sentences))
+            curr_sentences = [s_next]
+            curr_words = w_next
+        else:
+            curr_sentences.append(s_next)
+            curr_words += w_next
+
+    if curr_sentences:
+        chunks.append(" ".join(curr_sentences))
+
+    return chunks
+
 def _get_jaccard_similarity(str1, str2):
     """Calculates word overlap similarity between two strings."""
     a = set(re.findall(r'\w+', str1.lower()))
@@ -379,7 +589,7 @@ def _map_citations_to_text(llm_response, chunks):
     display_citations = sorted([int(k) for k in display_to_actual.keys()])
     return "\n".join(mapped_lines), display_citations, display_to_actual
 
-def answer_question(context, question):
+def answer_question(context, question, retriever_fn=None, chunker_fn=None):
     """Answers a question with grounded citations from the blog content."""
     if not context or not question:
         return "I need both context and a question to provide an answer."
@@ -387,9 +597,14 @@ def answer_question(context, question):
     print(f"AI RESEARCH: Processing question '{question}'", flush=True)
 
     # 1. Chunk the blog, then RETRIEVE only the most relevant chunks for this
-    #    question (semantic top-k) instead of feeding the whole article.
-    all_chunks = chunk_text(context)
-    retrieved = retrieve_chunks(question, all_chunks)  # [(orig_index, text), ...]
+    #    question instead of feeding the whole article.
+    if retriever_fn is None:
+        retriever_fn = retrieve_chunks
+    if chunker_fn is None:
+        chunker_fn = chunk_text
+
+    all_chunks = chunker_fn(context)
+    retrieved = retriever_fn(question, all_chunks)  # [(orig_index, text), ...]
     context_chunks = [c for (_idx, c) in retrieved]
 
     import string
@@ -430,12 +645,16 @@ def answer_question(context, question):
     system_prompt = (
         "You are a precise assistant. Answer the question using ONLY the blog sections provided.\n"
         "Every claim in your answer must be directly supported by the text. If the article does "
-        "not address the question, say so plainly instead of guessing or adding outside knowledge.\n"
+        "not address the question, respond with exactly one short sentence stating that the content "
+        "does not address the question; do NOT add outside knowledge and do NOT provide extra details "
+        "about what the source does cover.\n"
         "Do NOT add preamble like 'Here are the points'. Start directly with the answer.\n"
-        "Format the answer as 3-5 concise bullet points, each stating a fact found in the text. "
-        "Every bullet must directly answer the question - do NOT add bullets that merely note "
-        "what the article does not say, and do not repeat the same point twice.\n"
-        "Avoid long paragraphs and do not speculate about methodology, causes, or implications "
+        "Provide a clear, direct answer in as many complete declarative sentences as needed to cover "
+        "the relevant facts, with no filler, that explicitly reference the question topic. Do not output "
+        "single-word answers or incomplete fragments.\n"
+        "If multiple points are needed, use concise bullets where each bullet is a full, self-contained sentence. "
+        "Each point must explicitly connect back to what the question is asking, not just restate a fact from the text in isolation.\n"
+        "Avoid long rambling paragraphs and do not speculate about methodology, causes, or implications "
         "that the article does not state.\n"
         "Then add one KEY INSIGHT (1-2 sentences) that connects the facts above - it must still "
         "be grounded in the article, not external opinion.\n"
@@ -457,7 +676,8 @@ def answer_question(context, question):
                 model=AI_MODEL,
                 messages=messages,
                 temperature=0.2,
-                max_tokens=1024
+                max_tokens=1024,
+                extra_body={"reasoning_budget": 0}
             )
             if not completion.choices:
                 print("AI ERROR: No choices returned by LLM", flush=True)
@@ -715,8 +935,11 @@ def stream_answer(context, question):
         return
 
     system_prompt = (
-        "You are a helpful assistant. Use the blog content provided to answer the question.\n"
-        "Keep it concise and grounded in the text."
+        "You are a precise assistant. Answer the question using ONLY the blog content or sections provided.\n"
+        "Every claim in your answer must be directly supported by the text. If the content does not address "
+        "the question, respond with exactly one short sentence stating that the content does not address the question; "
+        "do NOT add outside knowledge and do NOT provide extra details about what the source does cover.\n"
+        "Keep the response concise, clear, and direct with no conversational filler or preambles."
     )
     
     messages = [
@@ -728,8 +951,9 @@ def stream_answer(context, question):
         response = client.chat.completions.create(
             model=AI_MODEL,
             messages=messages,
-            temperature=0.7,
-            stream=True
+            temperature=0.2,
+            stream=True,
+            extra_body={"reasoning_budget": 0}
         )
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:

@@ -1057,7 +1057,9 @@ def new_post():
             'revision_count': 1
         }).inserted_id
         
+        # Pre-warm AI chunk cache in background on publish
         if not is_draft:
+            ai_service.prewarm_post_chunk_cache(post_id, clean_content, async_mode=True)
             log_activity(session['user'], "published a new story", post_id, form.title.data)
             flash('Published!', 'success')
         else:
@@ -1290,8 +1292,17 @@ def ai_chat_stream(post_id):
     soup = BeautifulSoup(post.get('content', ''), 'html.parser')
     clean_text = soup.get_text()
 
+    # Scope retrieval to the current post's own chunks using production chunker
+    chunks = ai_service.chunk_text(clean_text)
+    if chunks:
+        retrieved = ai_service.retrieve_chunks(question, chunks, post_id=str(obj_id))
+        retrieved_texts = [chunk_text for _idx, chunk_text in retrieved] if retrieved else chunks
+        chunked_context_str = "\n\n".join(f"Section {i+1}:\n{t}" for i, t in enumerate(retrieved_texts))
+    else:
+        chunked_context_str = clean_text
+
     from flask import Response
-    return Response(ai_service.stream_answer(clean_text, question), mimetype='text/event-stream')
+    return Response(ai_service.stream_answer(chunked_context_str, question), mimetype='text/event-stream')
 
 @app.route('/ai/research', methods=['POST'])
 @limiter.limit("20 per hour")
@@ -1424,6 +1435,11 @@ def edit_post(post_id):
             'updated_at': datetime.now(timezone.utc)
         }, '$inc': {'revision_count': 1}})
         
+        # Invalidate cached chunk embeddings and AI summary for this post
+        ai_service.invalidate_post_chunk_cache(post_id)
+        if not is_draft:
+            ai_service.prewarm_post_chunk_cache(post_id, clean_content, async_mode=True)
+        
         if was_draft and not is_draft:
              log_activity(session['user'], "published a new story", post_id, form.title.data)
              flash('Story published!', 'success')
@@ -1464,6 +1480,7 @@ def delete_post(post_id):
         
     posts.delete_one({'_id': obj_id})
     comments.delete_many({'post_id': obj_id})
+    ai_service.invalidate_post_chunk_cache(post_id)
     flash('Story deleted.', 'success')
     return redirect(url_for('dashboard'))
 
